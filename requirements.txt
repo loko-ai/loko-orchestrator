@@ -1,0 +1,10 @@
+aiohttp
+contextvars_executor
+dict-path
+docker
+python-engineio
+python-socketio
+sanic
+sanic-cors
+sanic-jwt
+sanic-openapi
