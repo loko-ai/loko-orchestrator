@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
+from loko_orchestrator.business.components.commons import Custom
+from loko_orchestrator.business.groups import get_components, FACTORY
 from loko_orchestrator.utils.dict_utils import ObjectDict
 
 from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template
 from loko_orchestrator.utils.jsonutils import GenericJsonEncoder, GenericJsonDecoder
 from loko_orchestrator.utils.logger_utils import logger
+from importlib.resources import path
 
 
 # from loko_orchestrator.utils.projects_utils import check_prj_duplicate, check_prj_id_duplicate
@@ -114,8 +117,8 @@ class FSProjectDAO(ProjectDAO):
                 #     p = ObjectDict(json.load(f))
                 if info:
                     m = dict()
-                    m["id"] = p.id
-                    m["name"] = p.name
+                    m["id"] = el.name
+                    m["name"] = el.name
                     m["created_on"] = p.created_on
                     m["last_modify"] = p.last_modify
                     m["description"] = p.description
@@ -132,6 +135,8 @@ class FSProjectDAO(ProjectDAO):
             logger.debug("opening project: %s" % path)
             with open(path, "r") as o:
                 prj = json.load(o, object_hook=self._dec.object_hook)
+                prj.id = id
+                prj.name = id
         except Exception as e:
             try:
                 logger.debug("first attempt project opening failed")
@@ -139,6 +144,8 @@ class FSProjectDAO(ProjectDAO):
                 with open(path, "r") as o:
                     prj = json.load(o)
                 prj = self.update_structure(prj)
+                prj.id = id
+                prj.name = id
             except Exception as e:
                 logger.exception("impossible to load %s" % str(self.path / (id + self.ext)))
                 raise e
@@ -148,7 +155,13 @@ class FSProjectDAO(ProjectDAO):
         # project.last_modify = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
         logger.debug(f"saving project..{project.name} -- {project.id}")
         path = self.path / project.id
-        path.mkdir(exist_ok=True, parents=True)
+        if not path.exists():
+            path.mkdir(exist_ok=True, parents=True)
+            for p in ["extensions", "dao", "business", "services", "model", "utils"]:
+                np = path / p
+                np.mkdir(exist_ok=True, parents=True)
+                (np / "__init__.py").touch()
+
         with open(path / ("loko" + self.ext), "w") as o:
             json.dump(project, o, default=self._enc.default, indent=2)
 
@@ -171,6 +184,15 @@ class FSProjectDAO(ProjectDAO):
         p = self.path / (id)
         shutil.rmtree(p)
 
+    def rename(self, id, new_id):
+        p = self.path / id
+        np = self.path / new_id
+        if not p.exists():
+            raise Exception(f"{id} doesn't exist")
+        if np.exists():
+            raise Exception(f"{new_id} doesn't exist")
+        p.rename(np)
+
     """def update_structure(self, prj):
         if isinstance(prj, dict):
             prj_name = prj["id"]
@@ -190,6 +212,37 @@ class FSProjectDAO(ProjectDAO):
             logger.debug(f"saving new project file {prj_id}")
             self.save_json(id=prj_id, o=prj, f_name=prj_name, update=False)
         return self.get(prj_id)"""
+
+    def get_components(self, id):
+        components = get_components()
+        custom = []
+
+        conf = self.path / id / "extensions" / "components.json"
+        print("Project", conf, conf.exists())
+        if conf.exists():
+            with open(conf) as comp:
+                for d in json.load(comp):
+                    c = Custom(**d)
+                    custom.append(c)
+                    print(c)
+                    FACTORY[c.name] = c
+        return components + [dict(group="Custom", components=custom)]
+
+    def new_extension(self, id):
+        p = self.path / id
+        if p.exists():
+
+            rp = path("loko_orchestrator", "resources")
+
+            exts = rp / "extensions"
+            for el in (exts / "code").iterdir():
+                shutil.copy(el, p / "extensions" / el.name)
+            for el in (exts / "config").iterdir():
+                shutil.copy(el, p / el.name)
+
+
+        else:
+            raise Exception(f"{id} not found")
 
 
 class TemplateDAO(FSProjectDAO):
@@ -238,6 +291,11 @@ class TemplateDAO(FSProjectDAO):
         p.graph = gr
         logger.debug("saving projects %s" % p.__dict__)
         return self.save(p)
+
+    def delete(self, id):
+        p = self.path / id
+        if p.exists():
+            p.unlink()
 
 
 if __name__ == '__main__':

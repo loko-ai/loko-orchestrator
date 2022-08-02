@@ -1,6 +1,6 @@
 from aiohttp import ClientSession, ClientTimeout
 import ast
-from loko_orchestrator.config.app_config import ASYNC_SESSION_TIMEOUT
+# from loko_orchestrator.config.app_config import ASYNC_SESSION_TIMEOUT
 from loko_orchestrator.utils.config_utils import guess_convert
 
 
@@ -14,7 +14,7 @@ class AsyncRequest:
 
 
 async def request(url, method="GET", accept="json", **kwargs):
-    async with ClientSession(timeout=ClientTimeout(total=ASYNC_SESSION_TIMEOUT)) as session:
+    async with ClientSession(timeout=ClientTimeout(total=1000)) as session:
         resp = await session.request(method=method, url=url, **kwargs)
         if resp.status != 200:
             raise Exception((await resp.text()).strip('"'))

@@ -22,14 +22,19 @@ from sanic_cors import CORS
 from sanic_openapi import swagger_blueprint, doc
 from socketio.exceptions import ConnectionError
 
+from loko_orchestrator.business.builder.docker_builder import build_extension_image, run_extension_image
 from loko_orchestrator.business.converters import project2processor, cached_messages, get_project_info
 from loko_orchestrator.business.engine import repository
 # from loko_orchestrator.business.forms import all_forms, get_form
 # from loko_orchestrator.business.groups import get_components
+
 # from loko_orchestrator.config.app_config import sio, pdao, tdao, fsdao, DEBUG, \
 #    PLUGIN_DAO, services_scan, ASYNC_SESSION_TIMEOUT, GATEWAY, PORT, CORS_ON
 # from loko_orchestrator.model.plugins import Plugin
 from loko_orchestrator.business.groups import get_components
+from loko_orchestrator.config import app_config
+
+app_config.init()
 from loko_orchestrator.config.app_config import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, pdao, tdao, fsdao, PORT, DEBUG, \
     sio
 from loko_orchestrator.model.projects import Project, LATEST_PRJ_VERSION
@@ -322,8 +327,8 @@ def update_info_project(request, id):
     prj = pdao.get(id)
     """if prj.name != new_name:
         check_prj_duplicate(new_name)"""
-    pdao.update(id, request.json)
-    return sjson(pdao.get(id).info())
+    pdao.rename(id, new_name)
+    return sjson(pdao.get(new_name).info())
 
 
 @bp.get("/templates")
@@ -347,7 +352,7 @@ def template_by_id(request, id):
 
 @bp.put("/templates/<id>")
 @doc.consumes(doc.JsonBody(), location="body")
-def delete_template(request, id):
+def update_template(request, id):
     tdao.save_json(id, request.json)
     return sjson(request.json)
 
@@ -392,9 +397,9 @@ def resources(request):
     return myjson(res)  # gateway=EXTERNAL_GATEWAY,
 
 
-@bp.get("/components")
-def components(request):
-    return myjson(get_components())
+@bp.get("/components/<id>")
+def components(request, id):
+    return myjson(pdao.get_components(id))
 
 
 """@bp.get("/forms")
@@ -585,7 +590,6 @@ def update_files(request, path=None):
     return myjson("ok")
 
 
-"""
 @bp.post("/files")
 @bp.post("/files/<path:path>")
 @doc.consumes(doc.String(name="output", choices=["xlsx", "csv", "txt"]), required=False)
@@ -605,12 +609,12 @@ def create_file(request, path=None):
         if request.files:
             f = request.files.get("file")
             p = Path(path or "/") / f.name
-            check_special_characters(p.stem)
-            check_for_duplicate(p, f.name)
-            if p.suffix == ".project":
+            # check_special_characters(p.stem)
+            # check_for_duplicate(p, f.name)
+            """if p.suffix == ".project":
                 check_prj_duplicate(p.stem)
             else:
-                check_for_duplicate(p, f.name)
+                check_for_duplicate(p, f.name)"""
             bb = io.BytesIO(f.body)
             bb.seek(0)
             if p.suffix == ".project":
@@ -624,15 +628,15 @@ def create_file(request, path=None):
             if not p.suffix:
                 raise SanicException('Add file extension',
                                      status_code=400)
-            check_for_duplicate(p, p.name)
-            check_special_characters(p.stem)
+            """check_for_duplicate(p, p.name)
+            check_special_characters(p.stem)"""
             bb = io.BytesIO(request.body)
             bb.seek(0)
             fsdao.save(p, bb)
 
         else:
-            check_for_duplicate(path, path)
-            check_special_characters(path.split('/')[-1])
+            """check_for_duplicate(path, path)
+            check_special_characters(path.split('/')[-1])"""
             fsdao.mkdir(path)
     return myjson("ok")
 
@@ -640,7 +644,7 @@ def create_file(request, path=None):
 @bp.delete("/files/<path:path>")
 @doc.consumes(doc.String(name="path"), location="path")
 def delete_file(request, path):
-    check_protected_folders(path)
+    # check_protected_folders(path)
     path = unquote(path)
     fsdao.delete(path)
     return myjson("ok")
@@ -649,15 +653,15 @@ def delete_file(request, path):
 @bp.patch("/files/<path:path>")
 @doc.consumes(doc.Object(name="newPath", cls=dict), location="body")
 def move_file(request, path):
-    check_protected_folders(path)
+    # check_protected_folders(path)
     path = Path(unquote(path))
     newpath = Path(request.json['path'])
     if path.suffix and not newpath.suffix:
         raise SanicException('Add file extension', status_code=400)
-    check_special_characters(newpath.stem)
-    check_for_duplicate(path, newpath)
+    # check_special_characters(newpath.stem)
+    # check_for_duplicate(path, newpath)
     fsdao.move(path, newpath)
-    return myjson("ok")"""
+    return myjson("ok")
 
 
 @bp.post("/copy/<path:path>")
@@ -666,6 +670,23 @@ def copy(request, path):
     path = unquote(path)
     newpath = unquote(request.json['path'])
     fsdao.copy(path, newpath)
+
+    return myjson("ok")
+
+
+@bp.get("/build/<id>")
+@doc.consumes(doc.String(name="id"), location="path", required=True)
+def build(request, id):
+    print(pdao.path / id)
+    build_extension_image(pdao.path / id)
+    run_extension_image(id, GATEWAY)
+    return myjson("ok")
+
+
+@bp.post("/extensions/<id>")
+@doc.consumes(doc.String(name="id"), location="path", required=True)
+def build(request, id):
+    pdao.new_extension(id)
 
     return myjson("ok")
 

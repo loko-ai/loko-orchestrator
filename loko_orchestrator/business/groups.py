@@ -7,9 +7,14 @@ import requests
 
 from loko_orchestrator.business.components.collections import GrouperComponent, HeadComponent, SamplerComponent
 from loko_orchestrator.business.components.commons import Debug, Function, Trigger, Array, Selector, MergeComponent, \
-    SwitchComponent, Template, FilterComponent, FileConverter, Value, Renamer, Custom
-from loko_orchestrator.config import app_config
-from loko_orchestrator.config.app_config import pdao
+    SwitchComponent, Template, FilterComponent, Value, Renamer, Custom
+from loko_orchestrator.business.components.http import HTTPReq, HTTPResponse, HTTPRoute
+from loko_orchestrator.business.components.io import CSVReaderComponent, DirectoryComponent, FileContent, FileReader, \
+    LineReaderComponent, CSVWriterComponent, FileWriterComponent
+from loko_orchestrator.business.components.time import DelayComponent
+
+# from loko_orchestrator.config import app_config
+# from loko_orchestrator.config.app_config import pdao
 
 COMPONENTS = []
 
@@ -19,13 +24,13 @@ COMPONENTS.append(dict(group="Common",
                                    Selector(),
                                    SwitchComponent(), Trigger()]))  # , FileConverter()]))
 
-"""COMPONENTS.append(dict(group="HTTP", components=[HTTPReq(), HTTPResponse(), HTTPRoute(), Template()]))
+COMPONENTS.append(dict(group="HTTP", components=[HTTPReq(), HTTPResponse(), HTTPRoute(), Template()]))
 COMPONENTS.append(
     dict(group="Inputs",
          components=[CSVReaderComponent(), DirectoryComponent(), FileContent(), FileReader(), LineReaderComponent()]))
-COMPONENTS.append(dict(group="Integrations", components=[EmailListener(), EmailReader()]))
+# COMPONENTS.append(dict(group="Integrations", components=[EmailListener(), EmailReader()]))
 COMPONENTS.append(dict(group="Outputs", components=[CSVWriterComponent(), FileWriterComponent()]))
-COMPONENTS.append(dict(group="Time", components=[DelayComponent()]))"""
+COMPONENTS.append(dict(group="Time", components=[DelayComponent()]))
 # COMPONENTS.append(dict(group="Custom", components=[DelayComponent(), CSVWriterComponent()]))
 # COMPONENTS.append(dict(group="Cloud",components=[SageMaker(),AzureML(),GoogleML()]))
 # COMPONENTS.append(dict(group="Brokers",components=[RabbitMQ(),Kafka(),MQTT()]))
@@ -51,7 +56,7 @@ for el in ms:
 
 def get_components():
     ds4biz = []
-    try:
+    """try:
         for el in ms:
             _rtype = getattr(el, "microservice", None)
             el.disabled = False
@@ -68,20 +73,6 @@ def get_components():
 
     except Exception as inst:
         print("No gateway")
-        logging.exception(inst)
+        logging.exception(inst)"""
 
-    custom = []
-    for p in pdao.all(info=True):
-        conf = pdao.path / p['id'] / "extensions" / "components.json"
-        print("Project", conf, conf.exists())
-        if conf.exists():
-            with open(conf) as comp:
-                for d in json.load(comp):
-                    c = Custom(**d)
-                    custom.append(c)
-                    print(c)
-                    FACTORY[c.name] = c
-
-    return [dict(group="DS4Biz", components=ds4biz)] + COMPONENTS + [
-        dict(group="Custom", components=custom)
-    ]
+    return [dict(group="DS4Biz", components=ds4biz)] + COMPONENTS

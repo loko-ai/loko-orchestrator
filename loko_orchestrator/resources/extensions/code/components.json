@@ -1,0 +1,32 @@
+[
+  {
+    "microservice": "altro",
+    "name": "Extensions",
+    "events": null,
+    "group": "Custom",
+    "description": "",
+    "inputs": [
+      {
+        "id": "input",
+        "label": "input"
+      }
+    ],
+    "outputs": [
+      {
+        "id": "output",
+        "label": "output"
+      }
+    ],
+    "configured": true,
+    "options": {
+      "group": "Custom",
+      "args": [
+      ],
+      "click": null,
+      "icon": "RiTyphoonFill",
+      "values": {
+      }
+    },
+    "disabled": false
+  }
+]

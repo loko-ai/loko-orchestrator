@@ -7,8 +7,7 @@ from sanic.exceptions import SanicException
 
 from loko_orchestrator.business.engine import Fun, Notifier, Parameters, repository, ArrayStream, Merger, Filter, \
     Repository, Switch, AsyncFun
-from loko_orchestrator.config import app_config
-from loko_orchestrator.config.app_config import fsdao, sio
+# from loko_orchestrator.config.app_config import fsdao, sio
 from loko_orchestrator.model.components import Component, Field, Options, required, Text
 from loko_orchestrator.utils import async_request
 from loko_orchestrator.utils.codeutils import compile_fun
@@ -28,7 +27,7 @@ class Debug(Component):
     def create(self, name, **kwargs):
         p = Fun(lambda x: x, **kwargs)
         sender = kwargs.get("alias") or name
-        p.pipe(Notifier(sender, sio, "messages"))
+        # p.pipe(Notifier(sender, sio, "messages"))
         # p.pipe(Fun(lambda x: print("EEEEE", x)))
         return p
 
@@ -52,7 +51,7 @@ Variables available are:
         name = kwargs.get("alias") or name
         kwargs["name"] = name
         g = dict(Parameters=Parameters, repository=Repository(repository))
-        g.update(app_config.EXTERNAL_MODULES)
+        # g.update(app_config.EXTERNAL_MODULES)
         return Fun(compile_fun(code, g), propagate=propagate, notify_warnings=notify_warnings, **kwargs)
 
 
@@ -70,7 +69,7 @@ class FilterComponent(Component):
         name = kwargs.get("alias") or name
         kwargs["name"] = name
         g = dict(Parameters=Parameters, repository=Repository(repository))
-        g.update(app_config.EXTERNAL_MODULES)
+        # g.update(app_config.EXTERNAL_MODULES)
         return Filter(compile_fun(code, g), notify_warnings=notify_warnings, **kwargs)
 
 
@@ -270,7 +269,7 @@ class Template(Component):
         return Fun(f, **kwargs)
 
 
-class FileConverter(Component):
+"""class FileConverter(Component):
     def __init__(self):
         self.microservice = "file-converter"
         args = [
@@ -296,6 +295,7 @@ class FileConverter(Component):
                                                                    output_format=output_format), headers=headers)
 
         return AsyncFun(req, **kwargs)
+"""
 
 
 class Custom(Component):
@@ -314,3 +314,25 @@ class Custom(Component):
             return resp
 
         return AsyncFun(f, stream=True)
+
+
+class Custom(Component):
+    def __init__(self, microservice, name, **kwargs):
+        self.microservice = microservice
+        args = []
+
+        super().__init__(name, group="Custom")
+
+    def create(self, gateway, **kwargs):
+        async def f(v):
+            url = path.join(gateway, "routes", self.microservice)
+            print(url)
+
+            resp = await async_request.request(url, "POST", json=v)
+            return resp
+
+        return AsyncFun(f, stream=True)
+
+
+if __name__ == "__main__":
+    print("Ciao")

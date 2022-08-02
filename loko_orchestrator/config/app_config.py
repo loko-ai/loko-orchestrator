@@ -9,7 +9,6 @@ from socketio import AsyncClient
 # from ds4biz_orchestrator.config.inititalize import mount_ms_daos
 from loko_orchestrator.dao.fs import FSDao, LayeredFS
 # from ds4biz_orchestrator.dao.plugins import PluginDAO
-from loko_orchestrator.dao.projects import FSProjectDAO, TemplateDAO
 
 # from ds4biz_orchestrator.utils.codeutils import load_external_modules
 # from ds4biz_orchestrator.utils.pathutils import find_file
@@ -70,8 +69,17 @@ fsdao.mount("data", fs_dao)
             t = min(30, t)"""
 
 print(PUBLIC_FOLDER)
-pdao = FSProjectDAO(PUBLIC_FOLDER / "projects", ".project")
-tdao = TemplateDAO(PUBLIC_FOLDER / "templates")
+pdao = None
+tdao = None
+
+
+def init():
+    from loko_orchestrator.dao.projects import FSProjectDAO, TemplateDAO
+
+    global pdao, tdao
+    pdao = FSProjectDAO(PUBLIC_FOLDER / "projects", ".project")
+    tdao = TemplateDAO(PUBLIC_FOLDER / "templates")
+
 # EXTERNAL_MODULES = {}
 # imports = find_file("imports.json")
 # print("Imports", imports)
