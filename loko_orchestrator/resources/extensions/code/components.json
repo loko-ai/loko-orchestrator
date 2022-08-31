@@ -7,19 +7,37 @@
     "inputs": [
       {
         "id": "input",
-        "label": "input"
+        "label": "input",
+        "service": "",
+        "to": "output"
+      },
+      {
+        "id": "file_input",
+        "label": "file_input",
+        "service": "files",
+        "to": "file_output"
       }
     ],
     "outputs": [
       {
         "id": "output",
         "label": "output"
+      },
+      {
+        "id": "file_output",
+        "label": "file_output"
       }
     ],
     "configured": true,
     "options": {
       "group": "Custom",
       "args": [
+        {
+          "name": "param_example",
+          "type": "text",
+          "label": "Param Example",
+          "helper": "just an example"
+        }
       ],
       "click": null,
       "icon": "RiTyphoonFill",

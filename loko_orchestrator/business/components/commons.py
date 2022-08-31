@@ -320,7 +320,7 @@ class Custom(Component):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", project_id, service)
-                logger.debug("Calling url", url)
+                logger.debug(("Calling url", url))
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",
@@ -356,7 +356,7 @@ class SharedExtension(Component):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", self.pname, service)
-                logger.debug("Calling shared extension url", url)
+                logger.debug(("Calling shared extension url", url))
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",

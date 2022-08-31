@@ -2,25 +2,23 @@ import asyncio
 import io
 import json
 import logging
+import os
 import time
 import traceback
-from ast import literal_eval
 from datetime import datetime
-from fileinput import fileno
+from functools import wraps
 from pathlib import Path
 from urllib.parse import unquote
 from uuid import uuid4
 
 import aiodocker
 import sanic
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientTimeout
 from sanic import Blueprint
 from sanic import Sanic
-from sanic import response
-from sanic.exceptions import NotFound, SanicException
-from sanic.response import HTTPResponse, text
+from sanic.exceptions import NotFound, SanicException, Unauthorized
+from sanic.response import HTTPResponse
 from sanic.response import json as sjson, html
-from sanic.views import stream
 from sanic_cors import CORS
 from sanic_openapi import swagger_blueprint, doc
 from socketio.exceptions import ConnectionError
@@ -29,18 +27,14 @@ from loko_orchestrator.business.builder.aio_docker_builder import build_extensio
 from loko_orchestrator.business.components.commons import Custom
 from loko_orchestrator.business.converters import project2processor, cached_messages, get_project_info
 from loko_orchestrator.business.engine import repository
-# from loko_orchestrator.business.forms import all_forms, get_form
-# from loko_orchestrator.business.groups import get_components
-
 # from loko_orchestrator.config.app_config import sio, pdao, tdao, fsdao, DEBUG, \
 #    PLUGIN_DAO, services_scan, ASYNC_SESSION_TIMEOUT, GATEWAY, PORT, CORS_ON
 # from loko_orchestrator.model.plugins import Plugin
-from loko_orchestrator.business.groups import get_components, is_extension, deployed_extensions, FACTORY
-from loko_orchestrator.config import app_config
+from loko_orchestrator.business.groups import get_components, FACTORY
 from loko_orchestrator.config.app_config import pdao, sio, tdao, fsdao, shared_extensions_dao
-
-from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG
-from loko_orchestrator.model.projects import Project, LATEST_PRJ_VERSION
+from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER, \
+    LICENSE_VALIDATION_URL, PROJECTS_LIMIT
+from loko_orchestrator.model.projects import Project
 # from loko_orchestrator.utils.authutils import get_user_role
 # from loko_orchestrator.utils.conversions_utils import infer_ext, FORMATS2JSON
 # from loko_orchestrator.utils.file_conv_utils import FileConverter
@@ -50,6 +44,10 @@ from loko_orchestrator.utils.jsonutils import GenericJsonEncoder
 from loko_orchestrator.utils.logger_utils import logger
 # from loko_orchestrator.utils.projects_utils import check_prj_duplicate, check_prj_id_duplicate
 from loko_orchestrator.utils.sio_utils import emit
+import requests
+
+# from loko_orchestrator.business.forms import all_forms, get_form
+# from loko_orchestrator.business.groups import get_components
 
 # from loko_orchestrator.utils.update_version_prj_utils import get_updated_prj_structure
 # from loko_orchestrator.utils.zip_utils import files2zip, zip2files
@@ -82,6 +80,45 @@ if CORS_ON:
 #         return response.json(j, status=404, headers={"Access-Control-Allow-Origin": "*"})
 #     return response.json(j, status=500, headers={"Access-Control-Allow-Origin": "*"})
 
+def get_license(path):
+    fname = os.path.join(path, "LICENSE.txt")
+    if os.path.exists(fname):
+        try:
+            with open(fname) as f:
+                return f.read()
+        except Exception as e:
+            print(str(e))
+
+    print("License not found")
+    return None
+
+
+def validate(key, url):
+    data = requests.post(
+        url,
+        headers={
+            "Content-Type": "application/vnd.api+json",
+            "Accept": "application/vnd.api+json"
+        },
+        data=json.dumps({
+            "meta": {
+                "key": key
+            }
+        })
+    ).json()
+    return data["meta"].get("valid")
+
+
+def license_check(func):
+    global PROJECTS_LIMIT
+    key = get_license(PUBLIC_FOLDER)
+
+    r = validate(key, LICENSE_VALIDATION_URL)
+
+    if r:
+        PROJECTS_LIMIT = 100
+
+    return func
 
 flows = {}
 flows_info = {}
@@ -253,6 +290,7 @@ async def connect(sid, environ):
 @bp.get("/projects")
 @doc.consumes(doc.String(name="search"), location="query")
 @doc.consumes(doc.Boolean(name="info"), location='query')
+@license_check
 def projects(request):
     info = get_value(request.args, "info", "none", str).capitalize()
     prjs_info = pdao.all(info=eval(info))
@@ -277,12 +315,15 @@ def delete_project(request, id):
 @bp.post("/projects")
 @doc.consumes(doc.JsonBody(), location="body")
 def save_project(request):
-    req = request.json
+    global PROJECTS_LIMIT
     # check_prj_duplicate(req["name"])  # check if the project id is already present
-    p = Project(**request.json)
-    pdao.save(p)
-    res = p.info()
-    return sjson(res)
+    if len(pdao.all()) < PROJECTS_LIMIT:
+        p = Project(**request.json)
+        pdao.save(p)
+        res = p.info()
+        return sjson(res)
+    else:
+        raise Unauthorized("You can create a maximum of 3 projects")
 
 
 """
@@ -809,4 +850,4 @@ app.blueprint(bp)
 app.error_handler.add(Exception, generic_exception)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", access_log=True, port=PORT, debug=DEBUG, auto_reload=True)
+    app.run(host="0.0.0.0", access_log=True, port=PORT, debug=DEBUG, auto_reload=DEBUG)

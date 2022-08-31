@@ -5,6 +5,7 @@ dict-path
 docker
 python-engineio
 python-socketio
+requests
 sanic
 sanic-cors
 sanic-jwt

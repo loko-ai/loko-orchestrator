@@ -26,8 +26,6 @@ fsdao.mount("data", fs_dao)
 pdao: FSProjectDAO = FSProjectDAO(PUBLIC_FOLDER / "projects", ".project")
 tdao: TemplateDAO = TemplateDAO(PUBLIC_FOLDER / "templates")
 
-DEVELOPMENT = False
-
 shared_extensions_dao = SharedExtensionsDAO(PUBLIC_FOLDER / "shared/extensions", GATEWAY)
 # EXTERNAL_MODULES = {}
 # imports = find_file("imports.json")
