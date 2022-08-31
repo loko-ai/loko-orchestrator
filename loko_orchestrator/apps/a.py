@@ -1,5 +1,24 @@
-from importlib.resources import path
+import asyncio
 
-p = path("loko_orchestrator", "resources")
+import aiodocker
+from aiodocker.events import DockerEvents
 
-exts=p / "extensions"
+
+async def main():
+    client = aiodocker.Docker()
+    cont = await client.containers.run(name="sss", config={"Image": "sss", "HostConfig": {"AutoRemove": True}})
+    cont = await client.containers.get("sss")
+    async for el in cont.log(stdout=True, stderr=True, follow=True):
+        print(el)
+    await client.close()
+
+
+async def listen():
+    client = aiodocker.Docker()
+    sub = client.events.subscribe()
+    while True:
+        res = await sub.get()
+        print(res)
+
+
+asyncio.run(listen())

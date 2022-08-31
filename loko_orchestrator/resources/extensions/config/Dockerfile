@@ -5,5 +5,5 @@ ARG GATEWAY
 ENV GATEWAY=$GATEWAY
 ADD . /plugin
 ENV PYTHONPATH=$PYTHONPATH:/plugin
-WORKDIR /plugin/extensions
-CMD python components.py
+WORKDIR /plugin/services
+CMD python services.py

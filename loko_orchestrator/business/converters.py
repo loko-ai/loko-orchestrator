@@ -2,6 +2,7 @@ import logging
 import traceback
 from collections import defaultdict
 
+from loko_orchestrator.business.components.io import WireIn, WireOut
 # from loko_orchestrator.business.groups import FACTORY
 from loko_orchestrator.business.groups import FACTORY
 from loko_orchestrator.config.app_config import GATEWAY, sio
@@ -33,26 +34,40 @@ def get_project_info(p):
             edges[e.source].append(dict(end=e.target,
                                         endp1=e.sourceHandle,
                                         endp2=e.targetHandle))
+    wireouts = defaultdict(list)
+    for n in nodes.values():
+        if n.name == "Wire Out":
+            wire_in = n.values['wire_in']
+            wireouts[wire_in].append(n)
+    for n in nodes.values():
+        if n.name == "Wire In":
+            wire_in = n.values['alias']
+            for target in wireouts[wire_in]:
+                print(n.id, target.id)
+                edges[n.id].append(dict(end=target.id, endp1="output", endp2="input"))
 
     return p.id, nodes, edges, graphs
 
 
-def project2processor(id, pid, nodes, edges, tab, collect=False, **kwargs):
+def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwargs):
     def create_component(n):
-        cc = FACTORY[n.name]
+        cc = factory[n.name]
         try:
             logger.debug('VALUES: {val}'.format(val=n.values))
-            processors[n.id] = cc.create(id=n.id, name=n.name, gateway=GATEWAY, headers=headers, **n.values)
+            processors[n.id] = cc.create(id=n.id, name=n.name, gateway=GATEWAY, headers=headers, project_id=pid,
+                                         **n.values)
         except Exception as inst:
             # print(traceback.format_exc())
             logging.exception(inst)
             processors[n.id] = DummyProcessor(id=n.id, name=n.name)
             errors[n.id] = inst
         comp = processors[n.id]
+        print("DATTAAAAA", n.name, n.id)
         notifier = BatchedNotifier(pid, n.values.get("alias") or n.name, n.id, n.options["group"], sio, "messages",
                                    loop=asyncio.get_event_loop(),
                                    time=.25, max_messages=200, debug=bool(n.values.get("debug")), tab=tab)
         for output in n.outputs:
+            print(n.name, n.id, notifier.sid, output)
             comp.pipe(notifier, output=output)
 
         # Il componente debug non ha outputs

@@ -1,0 +1,11 @@
+FROM python:3.10-slim AS compile-image
+ADD requirements.lock /
+RUN pip install --user --upgrade  -r /requirements.lock
+
+
+FROM python:3.10.6-alpine AS build-image
+COPY --from=compile-image /root/.local /libraries
+ADD . /loko-orchestrator
+ENV PYTHONPATH=$PYTHONPATH:/loko-orchestrator:/libraries/lib/python3.10/site-packages
+WORKDIR /loko-orchestrator/loko_orchestrator/services
+CMD addgroup -g ${USER_GID} loko && adduser -u ${USER_UID} -D -G loko loko && su loko -c "python services.py"

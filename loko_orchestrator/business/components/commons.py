@@ -1,13 +1,17 @@
+import json
 import os
 import sys
 import traceback
+from functools import partial
+from io import StringIO
 from pathlib import Path
 from dict_path import DictPath
 from sanic.exceptions import SanicException
 
 from loko_orchestrator.business.engine import Fun, Notifier, Parameters, repository, ArrayStream, Merger, Filter, \
-    Repository, Switch, AsyncFun
+    Repository, Switch, AsyncFun, MultiFun, ProcessorError
 # from loko_orchestrator.config.app_config import fsdao, sio
+from loko_orchestrator.config.app_config import fsdao
 from loko_orchestrator.model.components import Component, Field, Options, required, Text
 from loko_orchestrator.utils import async_request
 from loko_orchestrator.utils.codeutils import compile_fun
@@ -17,6 +21,8 @@ from loko_orchestrator.resources.doc_http_component import template_doc
 from loko_orchestrator.utils.dict_path_utils import SafeDictPath
 
 from os import path
+
+from loko_orchestrator.utils.logger_utils import logger
 
 
 class Debug(Component):
@@ -299,39 +305,73 @@ class Template(Component):
 
 
 class Custom(Component):
-    def __init__(self, microservice, name, **kwargs):
-        self.microservice = microservice
+    def __init__(self, **kwargs):
         args = []
+        values = {}
+        if "options" in kwargs:
+            options = kwargs["options"]
+            args = options.get('args', [])
+            values = options.get("values", {})
+            del kwargs['options']
 
-        super().__init__(name, group="Custom")
+        super().__init__(args=args, values=values, **kwargs)
 
-    def create(self, gateway, **kwargs):
-        async def f(v):
-            url = path.join(gateway, self.microservice)
-            print(url)
+    def create(self, gateway, project_id, **kwargs):
+        async def f(v, input, service):
+            try:
+                url = path.join(gateway, "routes", project_id, service)
+                logger.debug("Calling url", url)
+                if isinstance(v, Path):
+                    with fsdao.get(v, "rb") as o:
+                        resp = await async_request.request(url, "POST",
+                                                           data={"file": o, "args": StringIO(json.dumps(kwargs))})
+                else:
+                    resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
+                return resp
+            except Exception as inst:
+                raise Exception("Problems with extension")
 
-            resp = await async_request.request(url, "POST", json=v)
-            return resp
+        mapping = {}
+        for el in self.inputs:
+            mapping[el['id']] = partial(f, input=el['id'], service=el.get("service", "")), el.get("to", "output")
 
-        return AsyncFun(f, stream=True)
+        return MultiFun(mapping, **kwargs)
 
 
-class Custom(Component):
-    def __init__(self, microservice, name, **kwargs):
-        self.microservice = microservice
+class SharedExtension(Component):
+    def __init__(self, pname, **kwargs):
         args = []
+        values = {}
+        self.pname = pname
+        print("KWARGSSS" * 20, kwargs)
+        if "options" in kwargs:
+            options = kwargs["options"]
+            args = options.get('args', [])
+            values = options.get("values", {})
+            del kwargs['options']
 
-        super().__init__(name, group="Custom")
+        super().__init__(args=args, values=values, **kwargs)
 
-    def create(self, gateway, **kwargs):
-        async def f(v):
-            url = path.join(gateway, "routes", self.microservice)
-            print(url)
+    def create(self, gateway, project_id, **kwargs):
+        async def f(v, input, service):
+            try:
+                url = path.join(gateway, "routes", self.pname, service)
+                logger.debug("Calling shared extension url", url)
+                if isinstance(v, Path):
+                    with fsdao.get(v, "rb") as o:
+                        resp = await async_request.request(url, "POST",
+                                                           data={"file": o, "args": StringIO(json.dumps(kwargs))})
+                else:
+                    resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
+                return resp
+            except Exception as inst:
+                raise Exception("Problems with extension")
 
-            resp = await async_request.request(url, "POST", json=v)
-            return resp
+        mapping = {}
+        for el in self.inputs:
+            mapping[el['id']] = partial(f, input=el['id'], service=el.get("service", "")), el.get("to", "output")
 
-        return AsyncFun(f, stream=True)
+        return MultiFun(mapping, name=self.name)
 
 
 if __name__ == "__main__":

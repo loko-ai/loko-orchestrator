@@ -157,3 +157,20 @@ class CSVWriterComponent(Component):
 
     def create(self, path=None, append=False, separator=',', overwrite=False, **kwargs):
         return CSVWriter(path, fsdao, append, separator, overwrite=overwrite, **kwargs)
+
+
+class WireIn(Component):
+    def __init__(self):
+        super().__init__("Wire In", group="Inputs", outputs=[], configured=True)
+
+    def create(self, **kwargs):
+        return Fun(lambda x: x)
+
+
+class WireOut(Component):
+    def __init__(self):
+        super().__init__("Wire Out", group="Outputs", inputs=[],
+                         args=[dict(name="wire_in", type="text", label="Wire in")])
+
+    def create(self, **kwargs):
+        return Fun(lambda x: x)

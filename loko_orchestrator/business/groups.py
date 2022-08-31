@@ -1,20 +1,25 @@
 import json
 import logging
 from os.path import join
+from pathlib import Path
 from urllib.parse import urljoin
 
+import aiodocker
 import requests
 
 from loko_orchestrator.business.components.collections import GrouperComponent, HeadComponent, SamplerComponent
 from loko_orchestrator.business.components.commons import Debug, Function, Trigger, Array, Selector, MergeComponent, \
-    SwitchComponent, Template, FilterComponent, Value, Renamer, Custom
+    SwitchComponent, Template, FilterComponent, Value, Renamer, Custom, SharedExtension
+from loko_orchestrator.business.components.ds4biz import Predictor
 from loko_orchestrator.business.components.http import HTTPReq, HTTPResponse, HTTPRoute
 from loko_orchestrator.business.components.io import CSVReaderComponent, DirectoryComponent, FileContent, FileReader, \
-    LineReaderComponent, CSVWriterComponent, FileWriterComponent
+    LineReaderComponent, CSVWriterComponent, FileWriterComponent, WireIn, WireOut
 from loko_orchestrator.business.components.time import DelayComponent
 
 # from loko_orchestrator.config import app_config
 # from loko_orchestrator.config.app_config import pdao
+from loko_orchestrator.config import app_config
+from loko_orchestrator.config.app_config import PUBLIC_FOLDER
 
 COMPONENTS = []
 
@@ -27,9 +32,10 @@ COMPONENTS.append(dict(group="Common",
 COMPONENTS.append(dict(group="HTTP", components=[HTTPReq(), HTTPResponse(), HTTPRoute(), Template()]))
 COMPONENTS.append(
     dict(group="Inputs",
-         components=[CSVReaderComponent(), DirectoryComponent(), FileContent(), FileReader(), LineReaderComponent()]))
+         components=[CSVReaderComponent(), DirectoryComponent(), FileContent(), FileReader(), LineReaderComponent(),
+                     WireIn()]))
 # COMPONENTS.append(dict(group="Integrations", components=[EmailListener(), EmailReader()]))
-COMPONENTS.append(dict(group="Outputs", components=[CSVWriterComponent(), FileWriterComponent()]))
+COMPONENTS.append(dict(group="Outputs", components=[CSVWriterComponent(), FileWriterComponent(), WireOut()]))
 COMPONENTS.append(dict(group="Time", components=[DelayComponent()]))
 # COMPONENTS.append(dict(group="Custom", components=[DelayComponent(), CSVWriterComponent()]))
 # COMPONENTS.append(dict(group="Cloud",components=[SageMaker(),AzureML(),GoogleML()]))
@@ -41,6 +47,7 @@ ms = [
     # EmailListener(),
     # Entities(),
     # Faker(), Matcher(), NLP(), Predictor(), Storage(), Textract(), Vision()
+    Predictor()
 ]
 
 FACTORY = {}
@@ -56,7 +63,7 @@ for el in ms:
 
 def get_components():
     ds4biz = []
-    """try:
+    try:
         for el in ms:
             _rtype = getattr(el, "microservice", None)
             el.disabled = False
@@ -73,6 +80,60 @@ def get_components():
 
     except Exception as inst:
         print("No gateway")
-        logging.exception(inst)"""
+        logging.exception(inst)
 
-    return [dict(group="DS4Biz", components=ds4biz)] + COMPONENTS
+    print(dict(group="DS4Biz", components=ds4biz))
+    print(dict(Custom=get_global_extensions()))
+
+    return [dict(group="DS4Biz", components=ds4biz)] + [
+        dict(group="Global", components=get_global_extensions())] + COMPONENTS
+
+
+def is_extension(path: Path):
+    print(path, list(path.glob("**/components.json")))
+    return len(list(path.glob("**/components.json"))) == 1
+
+
+def get_global_extensions():
+    ext = PUBLIC_FOLDER / "shared/extensions"
+    custom = []
+
+    if ext.exists():
+        for el in ext.iterdir():
+            if el.is_dir():
+                temp = list(el.glob("**/components.json"))
+                if len(temp) == 1:
+                    conf = temp[0]
+                    with open(conf) as comp:
+                        try:
+                            for d in json.load(comp):
+                                c = SharedExtension(pname=el.name, **d)
+                                custom.append(c)
+                                FACTORY[c.name] = c
+                        except Exception as e:
+                            logging.exception(e)
+
+    return custom
+
+
+async def deployed_extensions():
+    ext = PUBLIC_FOLDER / "shared/extensions"
+    custom = []
+    client = aiodocker.Docker()
+    ret = []
+
+    if ext.exists():
+        for el in ext.iterdir():
+            if el.is_dir():
+                temp = list(el.glob("**/components.json"))
+                if len(temp) == 1:
+                    try:
+                        temp = dict(name=el.name, status="off")
+                        ret.append(temp)
+                        await client.containers.get(el.name)
+                        temp["status"] = "deployed"
+                    except Exception as inst:
+                        print(el.name, inst)
+
+    await client.close()
+    return ret

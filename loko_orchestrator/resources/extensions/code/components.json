@@ -1,6 +1,5 @@
 [
   {
-    "microservice": "altro",
     "name": "Extensions",
     "events": null,
     "group": "Custom",

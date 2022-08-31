@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from loko_orchestrator.business.components.commons import Custom
-from loko_orchestrator.business.groups import get_components, FACTORY
 from loko_orchestrator.utils.dict_utils import ObjectDict
 
 from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template
@@ -84,6 +82,7 @@ class ProjectDAO:
 class InMemoryProjectDAO(ProjectDAO):
     def __init__(self):
         self.projects = {}
+        self.deployed = {}
 
     def all(self) -> List[str]:
         return list(self.projects.keys())
@@ -104,6 +103,7 @@ class FSProjectDAO(ProjectDAO):
         self._enc = GenericJsonEncoder(include_class=True)
         self._dec = GenericJsonDecoder([Project, Template, Edge, Node, Endpoint, Graph], )
         self.ext = ext
+        self.deployed = {}
 
     def all(self, info=None) -> List[str]:
         ret = []
@@ -123,6 +123,7 @@ class FSProjectDAO(ProjectDAO):
                     m["last_modify"] = p.last_modify
                     m["description"] = p.description
                     m["version"] = p.version
+                    m['deployed'] = self.is_deployed(el.name)
                     ret.append(m)
                 else:
                     ret.append(p.name)
@@ -213,8 +214,7 @@ class FSProjectDAO(ProjectDAO):
             self.save_json(id=prj_id, o=prj, f_name=prj_name, update=False)
         return self.get(prj_id)"""
 
-    def get_components(self, id):
-        components = get_components()
+    def get_local_components(self, id, klass):
         custom = []
 
         conf = self.path / id / "extensions" / "components.json"
@@ -222,11 +222,22 @@ class FSProjectDAO(ProjectDAO):
         if conf.exists():
             with open(conf) as comp:
                 for d in json.load(comp):
-                    c = Custom(**d)
+                    c = klass(**d)
                     custom.append(c)
-                    print(c)
-                    FACTORY[c.name] = c
-        return components + [dict(group="Custom", components=custom)]
+                    # FACTORY[c.name] = c
+        return [dict(group="Custom", components=custom)]
+
+    def get_extensions(self, id):
+        if self.has_extensions(id):
+            conf = self.path / id / "extensions" / "components.json"
+            with open(conf) as comp:
+                return json.load(comp)
+        else:
+            return []
+
+    def has_extensions(self, id):
+        p = self.path / id / "extensions/components.json"
+        return p.exists()
 
     def new_extension(self, id):
         p = self.path / id
@@ -236,13 +247,32 @@ class FSProjectDAO(ProjectDAO):
 
             exts = rp / "extensions"
             for el in (exts / "code").iterdir():
-                shutil.copy(el, p / "extensions" / el.name)
+                np = p / "extensions" / el.name
+                print("Code", el.name)
+
+                if not np.exists():
+                    if el.name == "services.py":
+                        shutil.copy(el, p / "services/services.py")
+
+                    else:
+                        shutil.copy(el, np)
             for el in (exts / "config").iterdir():
-                shutil.copy(el, p / el.name)
+                np = p / el.name
+                if not np.exists():
+                    shutil.copy(el, np)
 
 
         else:
             raise Exception(f"{id} not found")
+
+    def deploy(self, id):
+        self.deployed[id] = True
+
+    def undeploy(self, id):
+        self.deployed[id] = False
+
+    def is_deployed(self, id):
+        return self.deployed.get(id, False)
 
 
 class TemplateDAO(FSProjectDAO):

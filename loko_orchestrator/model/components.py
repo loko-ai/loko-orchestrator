@@ -26,15 +26,16 @@ class Text(Field):
 
 
 class Component:
-    def __init__(self, name, events=None, description=None, group=None, inputs=None, outputs=None, args=None, click=None, icon=None, values=None,
-                 configured=False):
+    def __init__(self, name, events=None, description=None, group=None, inputs=None, outputs=None, args=None,
+                 click=None, icon=None, values=None,
+                 configured=False, **kwargs):
         self.name = name
         self.events = events
         self.description = description
         self.inputs = inputs if inputs is not None else ["input"]
-        self.inputs = [dict(id=x, label=x) for x in self.inputs]
+        self.inputs = [x if isinstance(x, dict) else dict(id=x, label=x) for x in self.inputs]
         self.outputs = outputs if outputs is not None else ["output"]
-        self.outputs = [dict(id=x, label=x) for x in self.outputs]
+        self.outputs = [x if isinstance(x, dict) else dict(id=x, label=x) for x in self.outputs]
         self.configured = configured
         self.options = {"group": group, "args": args or [], "click": click, "icon": icon, "values": values or {}}
 

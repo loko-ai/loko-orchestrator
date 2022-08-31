@@ -139,6 +139,8 @@ class Processor:
         pass
 
     def pipe(self, processor, output="output", input="input"):
+        print("PIPING", self.name, processor.name, output, input)
+
         self.pipes[output].append((input, processor))
         processor.piped_from(self, output, input)
         return processor
@@ -175,6 +177,7 @@ class Processor:
     async def consume(self, value, input="input", flush=False, output="output", **kwargs):
         ret = None
         if isinstance(value, ProcessorError):
+            print("PERROR", value)
             await self.notify(value)
         else:
             try:
@@ -182,7 +185,9 @@ class Processor:
             except Exception as inst:
                 logger.debug(traceback.format_exc())
                 logging.exception(inst)
+                print("Ready to notify error", str(inst), self.name, self.id)
                 await self.notify(ProcessorError(str(inst), self.name, self.id), output=output)
+                print("Notified error", str(inst), self.name, self.id)
             if flush:
                 await self.end(input=input)
         return ret
@@ -903,6 +908,7 @@ class BatchedNotifier(Processor):
                         await emit(self.clients, self.label, json_friendly([x for x in self.queue if x]))
                     else:
                         msg = [x for x in self.queue if x and x.get('type') == "error"]
+
                         if msg:
                             await emit(self.clients, self.label,
                                        json_friendly(msg))
@@ -919,7 +925,9 @@ class BatchedNotifier(Processor):
         ret = {}
         error = isinstance(value, ProcessorError)
         msg = json_friendly(value)
+
         if error:
+            print("VALUE" * 10, value, error, value.source_id, self.sid)
             if value.source_id == self.sid:
                 self.errors += 1
                 ret = dict(info, project=self.project, group=self.group, name=self.sender, type="error",

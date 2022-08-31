@@ -6,6 +6,8 @@ import docker
 import requests
 from docker.errors import NotFound
 
+from loko_orchestrator.config.app_config import DEVELOPMENT
+
 client = docker.APIClient(base_url='unix://var/run/docker.sock')
 
 
@@ -42,20 +44,32 @@ def run_extension_image(id, gw):
             except Exception as inst:
                 logging.exception(inst)
                 print(inst, "Non c'è")
-    resp = requests.post(gw + "/rules", json={
-        "name": id,
-        "host": "localhost",
-        "port": 8083,
-        "type": "custom",
-        "scan": False
-    })
-    print(resp.text)
-    print(client.containers.run(id, name=id, ports={8080: 8083}, detach=True, labels={"type": "loko"}, remove=True,
-                                network="loko"))
+
+    if DEVELOPMENT:
+        print(client.containers.run(id, name=id, ports={8080: 8083}, detach=True, labels={"type": "loko"}, remove=True,
+                                    network="loko"))
+        resp = requests.post(gw + "/rules", json={
+            "name": id,
+            "host": "localhost",
+            "port": 8083,
+            "type": "custom",
+            "scan": False
+        })
+    else:
+        print(client.containers.run(id, name=id, detach=True, labels={"type": "loko"}, remove=True,
+                                    network="loko"))
+        resp = requests.post(gw + "/rules", json={
+            "name": id,
+            "host": id,
+            "port": 8080,
+            "type": "custom",
+            "scan": False
+        })
+
     print(f"Deployed {id}")
 
 
 if __name__ == "__main__":
-    id = "cincilla"
+    id = "clear"
     build_extension_image(f"/home/fulvio/loko/projects/{id}")
     run_extension_image(id, "http://localhost:8080")

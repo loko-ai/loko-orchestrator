@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import logging
+import time
 import traceback
 from ast import literal_eval
 from datetime import datetime
@@ -10,6 +11,7 @@ from pathlib import Path
 from urllib.parse import unquote
 from uuid import uuid4
 
+import aiodocker
 import sanic
 from aiohttp import ClientSession, ClientTimeout
 from sanic import Blueprint
@@ -18,11 +20,13 @@ from sanic import response
 from sanic.exceptions import NotFound, SanicException
 from sanic.response import HTTPResponse, text
 from sanic.response import json as sjson, html
+from sanic.views import stream
 from sanic_cors import CORS
 from sanic_openapi import swagger_blueprint, doc
 from socketio.exceptions import ConnectionError
 
-from loko_orchestrator.business.builder.docker_builder import build_extension_image, run_extension_image
+from loko_orchestrator.business.builder.aio_docker_builder import build_extension_image, run_extension_image
+from loko_orchestrator.business.components.commons import Custom
 from loko_orchestrator.business.converters import project2processor, cached_messages, get_project_info
 from loko_orchestrator.business.engine import repository
 # from loko_orchestrator.business.forms import all_forms, get_form
@@ -31,12 +35,11 @@ from loko_orchestrator.business.engine import repository
 # from loko_orchestrator.config.app_config import sio, pdao, tdao, fsdao, DEBUG, \
 #    PLUGIN_DAO, services_scan, ASYNC_SESSION_TIMEOUT, GATEWAY, PORT, CORS_ON
 # from loko_orchestrator.model.plugins import Plugin
-from loko_orchestrator.business.groups import get_components
+from loko_orchestrator.business.groups import get_components, is_extension, deployed_extensions, FACTORY
 from loko_orchestrator.config import app_config
+from loko_orchestrator.config.app_config import pdao, sio, tdao, fsdao, shared_extensions_dao
 
-app_config.init()
-from loko_orchestrator.config.app_config import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, pdao, tdao, fsdao, PORT, DEBUG, \
-    sio
+from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG
 from loko_orchestrator.model.projects import Project, LATEST_PRJ_VERSION
 # from loko_orchestrator.utils.authutils import get_user_role
 # from loko_orchestrator.utils.conversions_utils import infer_ext, FORMATS2JSON
@@ -82,6 +85,8 @@ if CORS_ON:
 
 flows = {}
 flows_info = {}
+
+app.config.update_config(dict(REQUEST_TIMEOUT=100 * 1000, RESPONSE_TIMEOUT=100 * 1000))
 
 
 def flows_list():
@@ -184,9 +189,12 @@ async def endpoints(request, project_id, path):
                 if n.data['name'] == "Route":
                     if n.data['options']['values'].get("path") == path:
                         id = n.id
+        factory = dict(FACTORY)
 
+        for el in pdao.get_extensions(project_id):
+            factory[el['name']] = Custom(**el)
         pid, nodes, edges, graphs = get_project_info(project)
-        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth)
+        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory)
 
     except Exception as inst:
         logging.exception(inst)
@@ -399,7 +407,7 @@ def resources(request):
 
 @bp.get("/components/<id>")
 def components(request, id):
-    return myjson(pdao.get_components(id))
+    return myjson(get_components() + pdao.get_local_components(id, Custom))
 
 
 """@bp.get("/forms")
@@ -431,9 +439,9 @@ async def message(request, project_id):
     # print("EMIT TRIGGER", project_id)
     logger.debug("EMIT TRIGGER %s" % project_id)
     bth = dict()
-    headers = dict(request.headers)
-    if "authorization" in headers:
-        bth["authorization"] = headers.pop("authorization")
+    # headers = dict(request.headers)
+    # if "authorization" in headers:
+    #    bth["authorization"] = headers.pop("authorization")
 
     # user, role = get_user_role(request)
     # print("USER OBJ ", user)
@@ -445,7 +453,14 @@ async def message(request, project_id):
 
     try:
         pid, nodes, edges, graphs = get_project_info(project)
-        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth)
+        factory = dict(FACTORY)
+
+        for el in pdao.get_extensions(pid):
+            factory[el['name']] = Custom(**el)
+
+        print(factory)
+
+        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory)
         alias = metadata[id].values.get("alias") or metadata[id].name
     except Exception as inst:
         logging.exception(inst)
@@ -486,33 +501,6 @@ def get_value(args, key, default, conv=int):
         return conv(args.get(key))
     else:
         return default
-
-
-"""
-@bp.post("/files/zip")
-@doc.consumes(doc.JsonBody(fields={"paths": list}), location="body")
-@doc.consumes(doc.String(name="folder_name"), location="query")
-def get_zip(request):
-    paths = request.json.get("paths")
-    folder_name = request.args.get("folder_name", "compressed_archive")
-    l = []
-    for p in paths:
-        r = unquote(str(fsdao.real(p)))
-        l.append(r)
-    z = files2zip(l, folder_name)
-    # headers = {'Content-Disposition': 'attachment; filename="{}"'.format(f'{str(uuid4())}.zip')}
-    # response.raw(body=z.read(), headers=headers, content_type="application/zip")
-    return response.text("file/s correctly compressed")
-
-
-@bp.get("/files/unzip")
-# @doc.consumes(doc.JsonBody(fields={"paths":list}), location="body")
-@doc.consumes(doc.String(name="file"), location="query")
-def get_unzipped(request):
-    # implementare possibilita' di non salvare il file zippato automaticamente, ma passarlo in download
-    file = request.args.get("file")
-    zip2files(file)
-    return text("file correctly unzipped")"""
 
 
 @bp.get("/files")
@@ -676,83 +664,86 @@ def copy(request, path):
 
 @bp.get("/build/<id>")
 @doc.consumes(doc.String(name="id"), location="path", required=True)
-def build(request, id):
-    print(pdao.path / id)
-    build_extension_image(pdao.path / id)
-    run_extension_image(id, GATEWAY)
+async def build(request, id):
+    print("PORCO" * 200, pdao.deployed)
+    if pdao.deployed.get(id, False):
+        pdao.undeploy(id)
+    else:
+        if pdao.has_extensions(id):
+            await build_extension_image(pdao.path / id)
+            await run_extension_image(id, GATEWAY)
+        pdao.deploy(id)
+    return myjson("ok")
+
+
+@bp.get("/undeploy/<id>")
+@doc.consumes(doc.String(name="id"), location="path", required=True)
+def undeploy(request, id):
+    pdao.undeploy(id)
     return myjson("ok")
 
 
 @bp.post("/extensions/<id>")
 @doc.consumes(doc.String(name="id"), location="path", required=True)
 def build(request, id):
+    print("Building new extension")
     pdao.new_extension(id)
 
     return myjson("ok")
 
 
-"""
-@bp.get("/preview/<path:path>")
-@doc.consumes(doc.String(name="separator"), required=False, location="query")
-@doc.consumes(doc.Integer(name="nrows"), required=False, location="query")
-def preview(request, path=None):
-    if path:
-        path = unquote(path)
-    separator = request.args.get("separator")
-    ext = request.args.get('output') or infer_ext(Path(path), FORMATS2JSON, default='csv')
-    ret = FORMATS2JSON[ext](path, int(request.args.get("nrows", 50)),
-                            delimiter=separator)
-
-    return sjson(ret)
-
-
-@bp.get("/files/convert/")
-@doc.consumes(doc.String(name="fname"), required=True, location="query")
-@doc.consumes(doc.String(name="output_format", choices=["csv"]), required=True)
-@doc.consumes(doc.String(name="input_format", choices=["xls"]), required=True)
-async def file_conv(request):
-    # print("aaaa ",request.json)
-    headers = dict(request.headers)
-    auth_headers = dict()
-    if "authorization" in headers:
-        auth_headers["authorization"] = headers.pop("authorization")
-    input_format = request.args.get("input_format")
-    output_format = request.args.get("output_format")
-    fname = request.args.get('fname')
-    # print("stiamo convertendo...", fname)
-    fc = FileConverter()
-    # print(fname)
-    r = await fc.convert(fname, input_format, output_format, auth_headers)
-    # print("rrrrrrrrrrrrrrrrr ",r)
-    return r
-
-
-@bp.put("/plugins")
-@doc.consumes(doc.JsonBody(), location="body")
-async def install_plugin(request):
-    PLUGIN_DAO.update(Plugin(**request.json))
-    return myjson("OK")
-
-
-@bp.get("/plugins")
-async def plugins(request):
-    ret = PLUGIN_DAO.all()
+@bp.get("/shared/extensions")
+async def shared_extensions(request):
+    ret = []
+    for el in shared_extensions_dao.all():
+        ret.append(dict(name=el, status=await shared_extensions_dao.status(el)))
     return myjson(ret)
 
 
-@bp.post("/plugins")
-@doc.consumes(doc.JsonBody(), location="body")
-async def new_plugin(request):
-    p = Plugin(**request.json)
-    PLUGIN_DAO.save(p)
+@bp.post("/shared/extensions/deploy/<id>")
+async def deploy_shared_extension(request, id):
+    if await shared_extensions_dao.status(id) != "running":
+        await shared_extensions_dao.deploy(id)
+    else:
+        print("Undeploying")
+        await shared_extensions_dao.undeploy(id)
+
+    await emit(sio, "project", time.time())
+    return myjson(f"{id} deployed")
 
 
-@bp.get("/commands/files")
-@doc.consumes(doc.Integer(name="cmd"), location="query")
-def exec_files_command(request):
-    search = get_value(request.args, "cmd", "", str)
-    if search:
-        pass"""
+@bp.get("/docker/events")
+async def docker_events(request):
+    response = await request.respond(content_type="text/html")
+    # client = aiodocker.Docker()
+    # sub = client.events.subscribe()
+    try:
+        while True:
+            value = str(await app.ctx.sub.get())
+            print("Sending", value)
+            await response.send(value + "\n")
+    except Exception as inst:
+        print(inst)
+    except BaseException as inst2:
+        print(inst2)
+
+
+@bp.get("/docker/logs/<id>")
+async def logs(request, id):
+    response = await request.respond(content_type="text/html")
+    client = aiodocker.Docker()
+    # sub = client.events.subscribe()
+    cont = await client.containers.get(id)
+    try:
+        async for ev in cont.log(stderr=True, stdout=True, follow=True):
+            print(ev)
+            await response.send(str(ev) + "\n")
+    except Exception as inst:
+        logging.exception(inst)
+        await client.close()
+    finally:
+        print("Closing")
+        await client.close()
 
 
 @app.listener('before_server_stop')
@@ -760,9 +751,11 @@ def term(app, loop):
     exit(0)
 
 
-@app.listener("before_server_start")
+@app.listener("after_server_start")
 async def b(app, loop):
     connected = False
+    app.ctx.client = aiodocker.Docker()
+    app.ctx.sub = app.ctx.client.events.subscribe()
     while not connected:
         try:
             await sio.connect(GATEWAY, wait=True)
@@ -816,9 +809,4 @@ app.blueprint(bp)
 app.error_handler.add(Exception, generic_exception)
 
 if __name__ == "__main__":
-    # for el in fsdao.ls():
-    #     print(type(el),el)
-    #
-    # print(fsdao.real('anomaly_report.csv'))
-    # app.update_config(dict(GRACEFUL_SHUTDOWN_TIMEOUT=0))
-    app.run(host="0.0.0.0", port=PORT, debug=DEBUG, auto_reload=True)
+    app.run(host="0.0.0.0", access_log=True, port=PORT, debug=DEBUG, auto_reload=True)

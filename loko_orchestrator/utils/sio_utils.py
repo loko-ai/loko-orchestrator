@@ -1,7 +1,7 @@
 import asyncio
 import traceback
 
-from loko_orchestrator.config.app_config import GATEWAY
+from loko_orchestrator.config.constants import GATEWAY
 from loko_orchestrator.utils.logger_utils import logger
 
 sio_lock = False
