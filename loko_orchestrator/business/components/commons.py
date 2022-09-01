@@ -324,7 +324,8 @@ class Custom(Component):
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",
-                                                           data={"file": o, "args": StringIO(json.dumps(kwargs))})
+                                                           data={"file": o,
+                                                                 "args": StringIO(json.dumps(kwargs))})
                 else:
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp
