@@ -15,7 +15,7 @@ def test():
 @app.route("/files", methods=["POST"])
 def test2():
     file = request.files['file']
-    fname = file.name
+    fname = file.filename
     print("You have uploaded a file called:",fname)
     return jsonify(dict(msg=f"Hello extensions, you have uploaded the file: {fname}!"))
 

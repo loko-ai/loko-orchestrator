@@ -82,9 +82,9 @@ async def run_extension_image(id, gw, dev=False):
     try:
         cont = await client.containers.run(name=id, config=config)
         print("Ora loggo")
-        async for msg in cont.log(stdout=True, stderr=True, follow=True):
-            print("Log", msg)
-        print("Deployed", id)
+        # async for msg in cont.log(stdout=True, stderr=True, follow=True):
+        #     print("Log", msg)
+        # print("Deployed", id)
         resp = requests.post(gw + "/rules", json={
             "name": id,
             "host": id,

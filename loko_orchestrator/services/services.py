@@ -6,12 +6,12 @@ import os
 import time
 import traceback
 from datetime import datetime
-from functools import wraps
 from pathlib import Path
 from urllib.parse import unquote
 from uuid import uuid4
 
 import aiodocker
+import requests
 import sanic
 from aiohttp import ClientTimeout
 from sanic import Blueprint
@@ -32,8 +32,7 @@ from loko_orchestrator.business.engine import repository
 # from loko_orchestrator.model.plugins import Plugin
 from loko_orchestrator.business.groups import get_components, FACTORY
 from loko_orchestrator.config.app_config import pdao, sio, tdao, fsdao, shared_extensions_dao
-from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER, \
-    LICENSE_VALIDATION_URL, PROJECTS_LIMIT
+from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER
 from loko_orchestrator.model.projects import Project
 # from loko_orchestrator.utils.authutils import get_user_role
 # from loko_orchestrator.utils.conversions_utils import infer_ext, FORMATS2JSON
@@ -44,7 +43,6 @@ from loko_orchestrator.utils.jsonutils import GenericJsonEncoder
 from loko_orchestrator.utils.logger_utils import logger
 # from loko_orchestrator.utils.projects_utils import check_prj_duplicate, check_prj_id_duplicate
 from loko_orchestrator.utils.sio_utils import emit
-import requests
 
 # from loko_orchestrator.business.forms import all_forms, get_form
 # from loko_orchestrator.business.groups import get_components
@@ -53,6 +51,8 @@ import requests
 # from loko_orchestrator.utils.zip_utils import files2zip, zip2files
 
 # POOL = ProcessPoolExecutor(max_workers=4)
+
+KEYGEN_SH_ACCOUNT = "f0c191ef-29dc-4f1b-9c9a-071d8f45fd20"
 
 appname = "orchestrator"
 app = Sanic(appname)
@@ -71,6 +71,7 @@ app.config["API_SECURITY_DEFINITIONS"] = {
 
 if CORS_ON:
     CORS(app, expose_headers=["Range"])
+
 
 # @app.exception(Exception)
 # async def generic_exception(request, exception):
@@ -93,9 +94,9 @@ def get_license(path):
     return None
 
 
-def validate(key, url):
+def validate(key, account_id):
     data = requests.post(
-        url,
+        "https://api.keygen.sh/v1/accounts/{}/licenses/actions/validate-key".format(account_id),
         headers={
             "Content-Type": "application/vnd.api+json",
             "Accept": "application/vnd.api+json"
@@ -106,19 +107,24 @@ def validate(key, url):
             }
         })
     ).json()
-    return data["meta"].get("valid")
+    ret = data["meta"].get("valid")
+
+    if ret:
+        return data["meta"].get("valid")
+    return False
 
 
 def license_check(func):
     global PROJECTS_LIMIT
     key = get_license(PUBLIC_FOLDER)
 
-    r = validate(key, LICENSE_VALIDATION_URL)
+    r = validate(key, KEYGEN_SH_ACCOUNT)
 
     if r:
         PROJECTS_LIMIT = 100
 
     return func
+
 
 flows = {}
 flows_info = {}
