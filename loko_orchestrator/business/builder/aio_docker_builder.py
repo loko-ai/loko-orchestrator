@@ -70,7 +70,7 @@ async def run_extension_image(id, gw, dev=False):
 
     except Exception as inst:
         print("kkk", inst)
-    config = dict(Image=id, ExposedPorts={
+    config = dict(Image=id, labels=dict(type="loko_project"), ExposedPorts={
         '8080/tcp': {},
     }, HostConfig={
         "AutoRemove": True,

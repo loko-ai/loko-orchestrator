@@ -24,6 +24,7 @@ from sanic_openapi import swagger_blueprint, doc
 from socketio.exceptions import ConnectionError
 
 from loko_orchestrator.business.builder.aio_docker_builder import build_extension_image, run_extension_image
+from loko_orchestrator.business.builder.dockermanager import DockerManager, DockerMessageCollector
 from loko_orchestrator.business.components.commons import Custom
 from loko_orchestrator.business.converters import project2processor, cached_messages, get_project_info
 from loko_orchestrator.business.engine import repository
@@ -35,6 +36,8 @@ from loko_orchestrator.config.app_config import pdao, sio, tdao, fsdao, shared_e
 from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER, \
     LICENSE_VALIDATION_URL, PROJECTS_LIMIT
 from loko_orchestrator.model.projects import Project
+from loko_orchestrator.services.deployment_services import add_deployment_services
+from loko_orchestrator.services.logging_services import add_logging_services
 # from loko_orchestrator.utils.authutils import get_user_role
 # from loko_orchestrator.utils.conversions_utils import infer_ext, FORMATS2JSON
 # from loko_orchestrator.utils.file_conv_utils import FileConverter
@@ -71,6 +74,7 @@ app.config["API_SECURITY_DEFINITIONS"] = {
 
 if CORS_ON:
     CORS(app, expose_headers=["Range"])
+
 
 # @app.exception(Exception)
 # async def generic_exception(request, exception):
@@ -119,6 +123,7 @@ def license_check(func):
         PROJECTS_LIMIT = 100
 
     return func
+
 
 flows = {}
 flows_info = {}
@@ -703,25 +708,6 @@ def copy(request, path):
     return myjson("ok")
 
 
-@bp.get("/build/<id>")
-@doc.consumes(doc.String(name="id"), location="path", required=True)
-async def build(request, id):
-    print("PORCO" * 200, pdao.deployed)
-    if pdao.deployed.get(id, False):
-        pdao.undeploy(id)
-    else:
-        if pdao.has_extensions(id):
-            await build_extension_image(pdao.path / id)
-            await run_extension_image(id, GATEWAY)
-        pdao.deploy(id)
-    return myjson("ok")
-
-
-@bp.get("/undeploy/<id>")
-@doc.consumes(doc.String(name="id"), location="path", required=True)
-def undeploy(request, id):
-    pdao.undeploy(id)
-    return myjson("ok")
 
 
 @bp.post("/extensions/<id>")
@@ -733,60 +719,6 @@ def build(request, id):
     return myjson("ok")
 
 
-@bp.get("/shared/extensions")
-async def shared_extensions(request):
-    ret = []
-    for el in shared_extensions_dao.all():
-        ret.append(dict(name=el, status=await shared_extensions_dao.status(el)))
-    return myjson(ret)
-
-
-@bp.post("/shared/extensions/deploy/<id>")
-async def deploy_shared_extension(request, id):
-    if await shared_extensions_dao.status(id) != "running":
-        await shared_extensions_dao.deploy(id)
-    else:
-        print("Undeploying")
-        await shared_extensions_dao.undeploy(id)
-
-    await emit(sio, "project", time.time())
-    return myjson(f"{id} deployed")
-
-
-@bp.get("/docker/events")
-async def docker_events(request):
-    response = await request.respond(content_type="text/html")
-    # client = aiodocker.Docker()
-    # sub = client.events.subscribe()
-    try:
-        while True:
-            value = str(await app.ctx.sub.get())
-            print("Sending", value)
-            await response.send(value + "\n")
-    except Exception as inst:
-        print(inst)
-    except BaseException as inst2:
-        print(inst2)
-
-
-@bp.get("/docker/logs/<id>")
-async def logs(request, id):
-    response = await request.respond(content_type="text/html")
-    client = aiodocker.Docker()
-    # sub = client.events.subscribe()
-    cont = await client.containers.get(id)
-    try:
-        async for ev in cont.log(stderr=True, stdout=True, follow=True):
-            print(ev)
-            await response.send(str(ev) + "\n")
-    except Exception as inst:
-        logging.exception(inst)
-        await client.close()
-    finally:
-        print("Closing")
-        await client.close()
-
-
 @app.listener('before_server_stop')
 def term(app, loop):
     exit(0)
@@ -796,7 +728,12 @@ def term(app, loop):
 async def b(app, loop):
     connected = False
     app.ctx.client = aiodocker.Docker()
-    app.ctx.sub = app.ctx.client.events.subscribe()
+    app.ctx.docker_manager = DockerManager(app.ctx.client)
+    mc = app.ctx.message_collector = DockerMessageCollector(client=app.ctx.client, sio=sio, app=app)
+    app.add_task(mc.event_task())
+    app.add_task(mc.dequeue())
+    app.add_task(mc.update_tasks())
+
     while not connected:
         try:
             await sio.connect(GATEWAY, wait=True)
@@ -845,9 +782,12 @@ async def generic_exception(request, exception):
     return sanic.json(j, status=status_code, headers={"Access-Control-Allow-Origin": "*"})
 
 
+add_logging_services(app, bp)
+add_deployment_services(app, bp, sio)
+
 app.blueprint(bp)
 
 app.error_handler.add(Exception, generic_exception)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", access_log=True, port=PORT, debug=DEBUG, auto_reload=DEBUG)
+    app.run(host="0.0.0.0", access_log=False, port=PORT, debug=DEBUG, auto_reload=DEBUG)

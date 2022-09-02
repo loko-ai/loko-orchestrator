@@ -344,7 +344,6 @@ class SharedExtension(Component):
         args = []
         values = {}
         self.pname = pname
-        print("KWARGSSS" * 20, kwargs)
         if "options" in kwargs:
             options = kwargs["options"]
             args = options.get('args', [])
