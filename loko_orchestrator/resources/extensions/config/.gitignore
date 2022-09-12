@@ -1,0 +1,7 @@
+.*
+venv
+!.gitignore
+!.dockerignore
+*.pyc
+dist
+__pycache__

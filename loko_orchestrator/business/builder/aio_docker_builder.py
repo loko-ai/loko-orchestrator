@@ -2,12 +2,105 @@ import asyncio
 import os
 
 from pathlib import Path
+from pprint import pprint
 
 import aiodocker
 import aiohttp
 import requests
+from aiodocker import DockerError
 from docker.api.build import process_dockerfile
 from docker.utils import tar
+import json
+
+from loko_orchestrator.apps.conv import Move, DictTransform, ChainTransform
+from loko_orchestrator.business.builder.config2docker import config2docker
+
+
+def ports_transform(d):
+    ret = {}
+    for k, v in d.items():
+        ret[f'{k}/tcp'] = [dict(HostPort=str(v))]
+    return ret
+
+
+def env_transform(d):
+    ret = []
+    for k, v in d.items():
+        ret.append(f"{k}:{v}")
+    return ret
+
+
+async def kill_if_exists(name, client):
+    try:
+        container = await client.containers.get(name)
+        await container.kill()
+        while await get_status(id, client):
+            await asyncio.sleep(0.5)
+
+
+    except DockerError as inst:
+        if inst.status == 404:
+            return
+
+
+async def run_container(name, labels, config, path):
+    client = aiodocker.Docker()
+    await kill_if_exists(name, client)
+    """hc = config.get("HostConfig") or {}
+
+    hc.update({
+        "AutoRemove": True,
+        "NetworkMode": 'loko',
+    })
+    if config.get("volumes"):
+        binds = []
+        for el in config['volumes']:
+            local, rm = el.split(":", maxsplit=1)
+            local = Path(local)
+            if not local.is_absolute():
+                local = path / local
+            local = str(local.resolve())
+            print(local, rm)
+            binds.append(f"{local}:{rm}")
+        if binds:
+            hc['Binds'] = binds
+
+    _config = dict(Image=config['image'], labels=labels, ExposedPorts={
+        '8080/tcp': {},
+    })
+    if 'Env' in config:
+        _config["Env"] = config["Env"]
+    pprint(_config)"""
+    config['labels'] = labels
+    print(config)
+    await client.containers.run(name=name, config=config)
+    await client.close()
+
+
+async def run_sides(path, gateway=None):
+    path = Path(path)
+    config_path = path / "config.json"
+    if config_path.exists():
+        with config_path.open() as o:
+            config = json.load(o)
+            web = config.get('web')
+            expose_to_gateway = config.get('expose_to_gateway', [])
+            ports = config.get("ports", [])
+            for name, side_config in config.get("side_containers", {}).items():
+                print(name, side_config)
+                tconfig = config2docker(side_config)
+
+                await run_container(name, labels=dict(type=f"{path.name}_side"), config=tconfig, path=path)
+                port = side_config.get("exposed")
+                print("A" * 100, gateway, name, expose_to_gateway, name in expose_to_gateway, port)
+                if gateway and name in expose_to_gateway and port:
+                    resp = requests.post(gateway + "/rules", json={
+                        "name": name,
+                        "host": name,
+                        "port": port,
+                        "type": "custom",
+                        "scan": False
+                    })
 
 
 def prepare_docker_ignore(path):
@@ -57,19 +150,10 @@ async def download(name):
     await docker.close()
 
 
-async def run_extension_image(id, gw, dev=False):
+async def run_extension_image(id, gw=None, dev=False):
     client = aiodocker.Docker()
     print("Trying to get", id)
-
-    try:
-        container = await client.containers.get(id)
-        await container.kill()
-        while await get_status(id, client):
-            await asyncio.sleep(0.5)
-
-
-    except Exception as inst:
-        print("kkk", inst)
+    await kill_if_exists(id, client)
     config = dict(Image=id, labels=dict(type="loko_project"), ExposedPorts={
         '8080/tcp': {},
     }, HostConfig={
@@ -85,13 +169,14 @@ async def run_extension_image(id, gw, dev=False):
         # async for msg in cont.log(stdout=True, stderr=True, follow=True):
         #     print("Log", msg)
         # print("Deployed", id)
-        resp = requests.post(gw + "/rules", json={
-            "name": id,
-            "host": id,
-            "port": 8080,
-            "type": "custom",
-            "scan": False
-        })
+        if gw:
+            resp = requests.post(gw + "/rules", json={
+                "name": id,
+                "host": id,
+                "port": 8080,
+                "type": "custom",
+                "scan": False
+            })
     except Exception as inst:
         print(inst)
     print("Routed", id)

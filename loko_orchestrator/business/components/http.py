@@ -64,8 +64,9 @@ class HTTPReq(Component):
 
     def create(self, url, method, accept="json", query=None, headers=None, **kwargs):
 
-        if not url.startswith(app_config.EXTERNAL_GATEWAY):
-            headers = dict()
+        """if not url.startswith(app_config.EXTERNAL_GATEWAY):
+            headers = dict()"""
+        headers = headers or dict()
 
         async def req(value, url=url, method=method, accept=accept, query=query):
             query = query or dict()

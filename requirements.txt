@@ -1,3 +1,4 @@
+GitPython
 aiodocker
 aiohttp
 contextvars_executor

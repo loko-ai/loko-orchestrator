@@ -7,6 +7,24 @@ from loko_orchestrator.utils.logger_utils import logger
 sio_lock = False
 
 
+class Throttle:
+    def __init__(self, f, t=0.1):
+        self.f = f
+        self.task = None
+        self.t = t
+
+    async def __call__(self, *args, **kwargs):
+        if self.task:
+            self.task.cancel()
+            self.task = None
+
+        async def temp():
+            await asyncio.sleep(self.t)
+            await self.f(*args, **kwargs)
+
+        self.task = asyncio.create_task(temp())
+
+
 async def emit(sio, event, data):
     # if event == 'animation':
     #     return None

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
+from loko_orchestrator.business.docker_ext import LokoDockerClient, LogCollector
 from loko_orchestrator.utils.dict_utils import ObjectDict
 
 from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template
@@ -158,7 +159,7 @@ class FSProjectDAO(ProjectDAO):
         path = self.path / project.id
         if not path.exists():
             path.mkdir(exist_ok=True, parents=True)
-            for p in ["extensions", "dao", "business", "services", "model", "utils"]:
+            for p in ["extensions", "dao", "business", "services", "model", "utils", "config"]:
                 np = path / p
                 np.mkdir(exist_ok=True, parents=True)
                 (np / "__init__.py").touch()
@@ -247,11 +248,13 @@ class FSProjectDAO(ProjectDAO):
 
             exts = rp / "extensions"
             for el in (exts / "code").iterdir():
+                (p / "extensions").mkdir(exist_ok=True)
                 np = p / "extensions" / el.name
                 print("Code", el.name)
 
                 if not np.exists():
                     if el.name == "services.py":
+                        (p / "services").mkdir(exist_ok=True)
                         shutil.copy(el, p / "services/services.py")
 
                     else:
@@ -265,13 +268,34 @@ class FSProjectDAO(ProjectDAO):
         else:
             raise Exception(f"{id} not found")
 
-    def deploy(self, id):
-        self.deployed[id] = True
+    async def deploy(self, id, client: LokoDockerClient, logs: LogCollector):
+        if self.has_extensions(id):
+            path = self.path / id
+            if not path.exists():
+                raise Exception(f"Project '{id}' not found")
 
-    def undeploy(self, id):
-        self.deployed[id] = False
+            # Build phase
+            builder_id = f"{id}:builder"
+            logs.add_log(builder_id)
+            result = await client.build(path)
+            if result:
+                # If the build is successful remove the logs and run the project
+                logs.remove_log(builder_id)
+                logs.add_log(id)
+                await client.run(id, id, network="loko", labels=['loko_project'])
 
-    def is_deployed(self, id):
+
+        else:
+            self.deployed[id] = True
+
+    async def undeploy(self, id):
+
+        if self.has_extensions(id):
+            pass
+        else:
+            self.deployed[id] = False
+
+    async def is_deployed(self, id):
         return self.deployed.get(id, False)
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from pathlib import Path
 
 import aiodocker
@@ -39,6 +40,16 @@ class SharedExtensionsDAO:
             client = aiodocker.Docker()
             container = await client.containers.get(id)
             await container.kill()
+            for el in await client.containers.list(filters={"label": [f"type={id}_side"]}):
+                print(el)
+                try:
+                    await el.kill()
+                except Exception as inst:
+                    print(id, inst)
+
+    def delete(self, id):
+        ext = self.path / id
+        shutil.rmtree(ext)
 
 
 if __name__ == "__main__":

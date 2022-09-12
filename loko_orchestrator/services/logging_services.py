@@ -12,4 +12,4 @@ def add_logging_services(app, bp):
     @bp.route("/logs")
     async def get_logs(request):
         mc: DockerMessageCollector = app.ctx.message_collector
-        return json(mc.logs)
+        return json(dict(logs=mc.logs, labels=mc.labels))

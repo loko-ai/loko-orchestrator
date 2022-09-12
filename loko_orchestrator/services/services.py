@@ -27,15 +27,18 @@ from loko_orchestrator.business.builder.aio_docker_builder import build_extensio
 from loko_orchestrator.business.builder.dockermanager import DockerManager, DockerMessageCollector
 from loko_orchestrator.business.components.commons import Custom
 from loko_orchestrator.business.converters import project2processor, cached_messages, get_project_info
+from loko_orchestrator.business.docker_ext import LokoDockerClient
 from loko_orchestrator.business.engine import repository
 # from loko_orchestrator.config.app_config import sio, pdao, tdao, fsdao, DEBUG, \
 #    PLUGIN_DAO, services_scan, ASYNC_SESSION_TIMEOUT, GATEWAY, PORT, CORS_ON
 # from loko_orchestrator.model.plugins import Plugin
 from loko_orchestrator.business.groups import get_components, FACTORY
+from loko_orchestrator.business.log_collector import LogCollector
 from loko_orchestrator.config.app_config import pdao, sio, tdao, fsdao, shared_extensions_dao
 from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER
 from loko_orchestrator.model.projects import Project
 from loko_orchestrator.services.deployment_services import add_deployment_services
+from loko_orchestrator.services.git_services import add_git_services
 from loko_orchestrator.services.logging_services import add_logging_services
 # from loko_orchestrator.utils.authutils import get_user_role
 # from loko_orchestrator.utils.conversions_utils import infer_ext, FORMATS2JSON
@@ -45,7 +48,7 @@ from loko_orchestrator.services.logging_services import add_logging_services
 from loko_orchestrator.utils.jsonutils import GenericJsonEncoder
 from loko_orchestrator.utils.logger_utils import logger
 # from loko_orchestrator.utils.projects_utils import check_prj_duplicate, check_prj_id_duplicate
-from loko_orchestrator.utils.sio_utils import emit
+from loko_orchestrator.utils.sio_utils import emit, Throttle
 
 # from loko_orchestrator.business.forms import all_forms, get_form
 # from loko_orchestrator.business.groups import get_components
@@ -55,7 +58,7 @@ from loko_orchestrator.utils.sio_utils import emit
 
 # POOL = ProcessPoolExecutor(max_workers=4)
 
-KEYGEN_SH_ACCOUNT = "f0c191ef-29dc-4f1b-9c9a-071d8f45fd20"
+KEYGEN_SH_ACCOUNT = "f4e70b1a-040e-495f-9d79-1ff16d44c2b1"
 
 appname = "orchestrator"
 app = Sanic(appname)
@@ -84,40 +87,56 @@ if CORS_ON:
 #         return response.json(j, status=404, headers={"Access-Control-Allow-Origin": "*"})
 #     return response.json(j, status=500, headers={"Access-Control-Allow-Origin": "*"})
 
-def get_license(path):
-    fname = os.path.join(path, "LICENSE.txt")
-    if os.path.exists(fname):
-        try:
-            with open(fname) as f:
-                return f.read()
-        except Exception as e:
-            print(str(e))
+class LicenseManager:
+    def __init__(self, path: Path):
+        self.path = path
+        self.valid = self.is_valid()
 
-    print("License not found")
-    return None
+    def is_valid(self):
+        key = self.get_license()
+        return self.validate(key, KEYGEN_SH_ACCOUNT)
+
+    def projects_limit(self):
+        if self.valid:
+            return 100
+        else:
+            return 5
+
+    def get_license(self):
+        license_path = self.path / "LICENSE.txt"
+        if license_path.exists():
+            try:
+                with license_path.open() as f:
+                    return f.read().strip()
+            except Exception as e:
+                print(str(e))
+
+        print("License not found")
+        return None
+
+    def validate(self, key, account_id):
+        data = requests.post(
+            "https://api.keygen.sh/v1/accounts/{}/licenses/actions/validate-key".format(account_id),
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json"
+            },
+            data=json.dumps({
+                "meta": {
+                    "key": key
+                }
+            })
+        ).json()
+        ret = data["meta"].get("valid")
+        print("Valid", ret)
+
+        if ret:
+            return data["meta"].get("valid")
+        return False
 
 
-def validate(key, account_id):
-    data = requests.post(
-        "https://api.keygen.sh/v1/accounts/{}/licenses/actions/validate-key".format(account_id),
-        headers={
-            "Content-Type": "application/vnd.api+json",
-            "Accept": "application/vnd.api+json"
-        },
-        data=json.dumps({
-            "meta": {
-                "key": key
-            }
-        })
-    ).json()
-    ret = data["meta"].get("valid")
-
-    if ret:
-        return data["meta"].get("valid")
-    return False
-
-
-def license_check(func):
+LICENSE_MANAGER = LicenseManager(PUBLIC_FOLDER)
+"""def license_check(func):
     global PROJECTS_LIMIT
     key = get_license(PUBLIC_FOLDER)
 
@@ -126,8 +145,7 @@ def license_check(func):
     if r:
         PROJECTS_LIMIT = 100
 
-    return func
-
+    return func"""
 
 flows = {}
 flows_info = {}
@@ -299,11 +317,17 @@ async def connect(sid, environ):
 @bp.get("/projects")
 @doc.consumes(doc.String(name="search"), location="query")
 @doc.consumes(doc.Boolean(name="info"), location='query')
-@license_check
-def projects(request):
+# @license_check
+async def projects(request):
     info = get_value(request.args, "info", "none", str).capitalize()
     prjs_info = pdao.all(info=eval(info))
-    print("Infor", prjs_info)
+    # manager: DockerManager = app.ctx.docker_manager
+    client: LokoDockerClient = app.ctx.client
+    deployed = await client.list_names()
+    print("DEPLOYED", deployed)
+    for p in prjs_info:
+        if (isinstance(p, dict)):
+            p['deployed'] = p['name'] in deployed
 
     res = prjs_info
     return sjson(res)
@@ -311,8 +335,13 @@ def projects(request):
 
 @bp.get("/projects/<id>")
 @doc.consumes(doc.String(name="id"), location="path", required=True)
-def project_by_id(request, id):
-    return myjson(pdao.get(id))
+async def project_by_id(request, id):
+    temp = pdao.get(id)
+    client: LokoDockerClient = app.ctx.client
+    deployed = await client.list_names()
+    temp.deployed = id in deployed
+
+    return myjson(temp)
 
 
 @bp.delete("/projects/<id>")
@@ -324,15 +353,15 @@ def delete_project(request, id):
 @bp.post("/projects")
 @doc.consumes(doc.JsonBody(), location="body")
 def save_project(request):
-    global PROJECTS_LIMIT
+    # global PROJECTS_LIMIT    non serve se non fai un assegnamento alla variabile
     # check_prj_duplicate(req["name"])  # check if the project id is already present
-    if len(pdao.all()) < PROJECTS_LIMIT:
+    if len(pdao.all()) < LICENSE_MANAGER.projects_limit():
         p = Project(**request.json)
         pdao.save(p)
         res = p.info()
         return sjson(res)
     else:
-        raise Unauthorized("You can create a maximum of 3 projects")
+        raise Exception("You can create a maximum of 5 projects")
 
 
 """
@@ -712,8 +741,6 @@ def copy(request, path):
     return myjson("ok")
 
 
-
-
 @bp.post("/extensions/<id>")
 @doc.consumes(doc.String(name="id"), location="path", required=True)
 def build(request, id):
@@ -723,20 +750,41 @@ def build(request, id):
     return myjson("ok")
 
 
+@bp.get("/license")
+def get_license_version(request):
+    return myjson(LICENSE_MANAGER.is_valid())
+
+
 @app.listener('before_server_stop')
 def term(app, loop):
     exit(0)
 
 
 @app.listener("after_server_start")
-async def b(app, loop):
+async def b(app: Sanic, loop):
     connected = False
-    app.ctx.client = aiodocker.Docker()
-    app.ctx.docker_manager = DockerManager(app.ctx.client)
-    mc = app.ctx.message_collector = DockerMessageCollector(client=app.ctx.client, sio=sio, app=app)
-    app.add_task(mc.event_task())
-    app.add_task(mc.dequeue())
-    app.add_task(mc.update_tasks())
+
+    # app.ctx.client = aiodocker.Docker()
+    # mc = app.ctx.message_collector = DockerMessageCollector(client=app.ctx.client, sio=sio, app=app)
+    # app.ctx.docker_manager = DockerManager(app.ctx.client, mc)
+    # app.add_task(mc.event_task())
+    # app.add_task(mc.dequeue())
+    # app.add_task(mc.update_tasks())
+    async def l(v):
+        name = v.get("name")
+        print(log_collector.get_logs(name)[-1])
+
+    async def temp(v):
+        print(v)
+        await sio.emit(v.get("type"), v)
+
+    event_notifier = Throttle(temp, t=1)
+
+    client = LokoDockerClient()
+    log_collector = LogCollector([event_notifier])
+    app.ctx.client = client
+    app.ctx.log_collector = log_collector
+    app.add_task(client.listen())
 
     while not connected:
         try:
@@ -753,12 +801,13 @@ async def b(app, loop):
     # app.aiohttp_session = ClientSession(loop=loop, timeout=total_timeout)
 
 
-@app.exception(Exception)
+"""@app.exception(Exception)
 async def manage_exception(request, exception):
+    print("ERRRR" * 100, str(exception))
     if isinstance(exception, NotFound):
         return sanic.json(str(exception), status=404)
-    print(traceback.format_exc())
-    return sanic.json(str(exception), status=500)
+    # print(traceback.format_exc())
+    return sanic.json(str(exception), status=500)"""
 
 
 @sio.event
@@ -771,27 +820,31 @@ async def disconnect():
     logger.debug('DISCONNECTED!!')
 
 
-@app.exception(Exception)
+# @app.exception(Exception)
 async def generic_exception(request, exception):
-    e = str(exception)
-    j = dict(error=e)
-    if not isinstance(exception, sanic.exceptions.NotFound):
-        logger.debug(traceback.format_exc())
-        logging.exception(exception)
-    else:
-        logger.debug(f'NOTFOUND EXCEPTION: {e}')
-    status_code = exception.status_code or 500
-    if isinstance(exception, NotFound):
-        return sanic.json(j, status=404, headers={"Access-Control-Allow-Origin": "*"})
-    return sanic.json(j, status=status_code, headers={"Access-Control-Allow-Origin": "*"})
+    try:
+        e = str(exception)
+        j = dict(error=e)
+        if not isinstance(exception, sanic.exceptions.NotFound):
+            # logger.debug(traceback.format_exc())
+            # logging.exception(exception)
+            pass
+        else:
+            logger.debug(f'NOTFOUND EXCEPTION: {e}')
+        status_code = getattr(exception, "status_code", None) or 500
+        if isinstance(exception, NotFound):
+            return sanic.json(j, status=404, headers={"Access-Control-Allow-Origin": "*"})
+        return sanic.json(j, status=status_code, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as inst:
+        logging.exception(inst)
 
 
 add_logging_services(app, bp)
 add_deployment_services(app, bp, sio)
-
+add_git_services(app, bp, sio)
 app.blueprint(bp)
 
-app.error_handler.add(Exception, generic_exception)
+# app.error_handler.add(Exception, generic_exception)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", access_log=False, port=PORT, debug=DEBUG, auto_reload=DEBUG)
