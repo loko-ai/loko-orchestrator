@@ -137,12 +137,16 @@ class Selector(Component):
         super().__init__("Selector", group="Common", description=selector_doc, icon="RiCursorFill",
                          args=[dict(name="ignore_err", label="Ignor Error", type="boolean",
                                     description="Choose whether to ignore error in case of a missing key or not"),
+                               dict(name="exclude", label="Exclude Keys", type="boolean",
+                                    description="If enabled, the output contains the whole input object excluding the specified keys; otherwise, only the specified keys are returned"
+                                     ),
                                dict(name="keys", label="Keys", type="multiKeyValue", validation=required,
-                                    description="the name of the key to select from the incoming message",
-
+                                    description="Name of the key/s to select from the incoming message",
                                     fields=[dict(name="k", placeholder="key", validation=required)])
                                ],
-                         values=dict(ignore_err=False))
+                         values=dict(ignore_err=False,
+                                     include=False
+                                     ))
 
     def reshape_nested_key(self, key, shape_back=False):
         if not shape_back:
@@ -154,26 +158,35 @@ class Selector(Component):
                 key = ".".join(key.split("/"))
         return key
 
-    def create(self, keys, ignore_err, **kwargs):
-        def f(v, keys=keys, ignore_err=ignore_err, **kwargs):
-            selected = SafeDictPath({})
+    def create(self, keys, ignore_err, exclude, **kwargs):
+        def f(v, keys=keys, ignore_err=ignore_err, exclude=exclude, **kwargs):
             v = SafeDictPath(v)
+            selected = SafeDictPath({}) if not exclude else v.copy()
             if not ignore_err:
                 for k in keys:
                     key = k["k"]
                     key = self.reshape_nested_key(key)
                     if key in v:
-                        selected[key] = v.get(key)
+                        if exclude:
+                            del selected[key]
+                        else:
+                            selected[key] = v.get(key)
+
                     else:
                         key = self.reshape_nested_key(key, shape_back=True)
-                        raise Exception(f"KeyError: {key}")
+                        raise KeyError(key)
             else:
                 for k in keys:
                     key = k["k"]
                     key = self.reshape_nested_key(key)
                     if key in v:
-                        selected[key] = v.get(key)
-            if len(keys) == 1:
+                        if exclude:
+                            del selected[key]
+                        else:
+                            selected[key] = v.get(key)
+
+
+            if len(keys) == 1 and not exclude:
                 selected = selected.get(key)
 
             try:
@@ -196,19 +209,18 @@ class Renamer(Component):
                     dict(name="source", placeholder="Source", validation=required),
                     dict(name="target", placeholder="Target", validation=required)
                 ])]
-
-        super().__init__("Rename", group="Common", description=selector_doc, icon="RiEditFill",
+        super().__init__("Renamer", group="Common", description=renamer_doc, icon="RiEditFill",
                          args=args, inputs=['input'])
 
     def create(self, keys, ignore_err, **kwargs):
         def f(v, keys=keys, ignore_err=ignore_err, **kwargs):
-            ret = {}
+            ret = v.copy()
             for key in keys:
                 if key["source"] not in v:
                     if not ignore_err:
-                        raise Exception(f"KeyError: {key['source']}")
+                        raise KeyError(key['source'])
                 else:
-                    ret[key['target']] = v.get(key['source'])
+                    ret[key['target']] = ret.pop(key['source'])
             return ret
 
         return Fun(f, **kwargs)
