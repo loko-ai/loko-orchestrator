@@ -81,12 +81,31 @@ The DEBUG component is used only to view the output of other components.
 ### Input
 In this case there is no fixed input format.'''
 
+renamer_doc = '''### Description
+The RENAMER component allows to rename one or more keys of an object.
+In order to add other keys you need to click on the **"Add field"** button.
+If the field **Ignore Error** is toggled, missing keys are ignored.
+
+
+
+### Input
+
+The input consists of an object.
+
+
+
+### Output
+
+The output is the object received in input, with the selected keys name modified as specified in the settings.
+
+'''
+
 selector_doc = '''### Description
 The SELECTOR component is used to select the value of one or more object keys. The required key/s are defined using the parameter **Keys**.
 
-In order to add other keys you need to click on the **"Add field"** buttons.
- 
-If the field **Ignore Error** is toggled, missing key values are ignored.
+In order to add other keys you need to click on the **"Add field"** button.
+
+If the field **Ignore Error** is toggled, missing keys are ignored.
 
 It's also possible to select nested key, just by writing them in a *key* field, and seperating them using a full stop. Let's consider the object in the example below: if you want to have access to the content of the "key3" object, you need to use the following notation "key1.key2.key3".
 
