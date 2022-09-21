@@ -749,6 +749,19 @@ def move_file(request, path):
     return myjson("ok")
 
 
+@bp.get("/preview/<path:path>")
+@doc.consumes(doc.String(name="separator"), required=False, location="query")
+@doc.consumes(doc.Integer(name="nrows"), required=False, location="query")
+def preview(request, path=None):
+    if path:
+        path = unquote(path)
+    separator = request.args.get("separator")
+    ext = request.args.get('output') or infer_ext(Path(path), FORMATS2JSON, default='csv')
+    ret = FORMATS2JSON[ext](path, int(request.args.get("nrows", 50)),
+                            delimiter=separator)
+
+    return sjson(ret)
+
 @bp.post("/copy/<path:path>")
 @doc.consumes(doc.Object(name="newPath", cls=dict), location="body")
 def copy(request, path):

@@ -16,7 +16,7 @@ from loko_orchestrator.model.components import Component, Field, Options, requir
 from loko_orchestrator.utils import async_request
 from loko_orchestrator.utils.codeutils import compile_fun
 from loko_orchestrator.resources.doc_commons_component import trigger_doc, debug_doc, function_doc, array_doc, \
-    filter_doc, selector_doc, merge_doc, switch_doc
+    filter_doc, selector_doc, merge_doc, switch_doc, renamer_doc
 from loko_orchestrator.resources.doc_http_component import template_doc
 from loko_orchestrator.utils.dict_path_utils import SafeDictPath
 
@@ -139,7 +139,7 @@ class Selector(Component):
                                     description="Choose whether to ignore error in case of a missing key or not"),
                                dict(name="exclude", label="Exclude Keys", type="boolean",
                                     description="If enabled, the output contains the whole input object excluding the specified keys; otherwise, only the specified keys are returned"
-                                     ),
+                                    ),
                                dict(name="keys", label="Keys", type="multiKeyValue", validation=required,
                                     description="Name of the key/s to select from the incoming message",
                                     fields=[dict(name="k", placeholder="key", validation=required)])
@@ -184,7 +184,6 @@ class Selector(Component):
                             del selected[key]
                         else:
                             selected[key] = v.get(key)
-
 
             if len(keys) == 1 and not exclude:
                 selected = selected.get(key)
