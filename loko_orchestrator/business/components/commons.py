@@ -112,7 +112,6 @@ class Value(Component):
                          values=dict(type="String", value="Hello world!"), icon="RiPlayFill", configured=True)
 
     def create(self, type, value, **kwargs):
-        print("KK" * 100, kwargs)
         if type == "Object":
             value = eval(value)
         return Fun(lambda x: value, propagate=True, **kwargs)
@@ -330,7 +329,7 @@ class Custom(Component):
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp
             except Exception as inst:
-                raise Exception("Problems with extension")
+                raise Exception(f"Problems with extension: {inst}")
 
         mapping = {}
         for el in self.inputs:

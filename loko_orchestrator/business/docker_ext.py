@@ -53,6 +53,10 @@ class LokoDockerClient:
         temp = await self.client.containers.list(filters={"name": [f"^{id}$"]})
         return bool(temp)
 
+    async def is_deployed(self, id):
+        temp = await self.list_names()
+        return id in temp
+
     async def get_status(self, id):
         if await self.exists(id):
             cont = await self.client.containers.get(id)
@@ -122,7 +126,7 @@ class LokoDockerClient:
         async for line in client.images.build(fileobj=context,
                                               encoding="gzip",
                                               tag=f"{path.name}",
-                                              buildargs=dict(GATEWAY="http://localhost:8080"), stream=True):
+                                              buildargs=dict(GATEWAY=GATEWAY), stream=True):
             if "stream" in line:
                 msg = line['stream'].strip()
 
@@ -134,7 +138,7 @@ class LokoDockerClient:
         return last_msg.startswith("Successfully tagged")
 
     async def run(self, name, image, replace=True, autoremove=True, network=None, environment=None, ports=None,
-                  volumes=None, labels=None, expose=None, gw=False):
+                  volumes=None, labels=None, expose=None, gw=False, path=None, log_task=None, **kwargs):
         if replace and await self.exists(name):
             container = await self.get(name)
             # await container.stop()
@@ -164,8 +168,18 @@ class LokoDockerClient:
             hc['PortBindings'] = temp
             config['ExposedPorts'] = exposed
 
-        if volumes:
-            pass
+        if volumes and path:
+            binds = []
+            for el in volumes:
+                local, rm = el.split(":", maxsplit=1)
+                local = Path(local)
+                if not local.is_absolute():
+                    local = path / local
+                local = str(local.resolve())
+                print(local, rm)
+                binds.append(f"{local}:{rm}")
+            if binds:
+                hc['Binds'] = binds
         if network:
             hc['NetworkMode'] = network
 
@@ -179,19 +193,21 @@ class LokoDockerClient:
                 temp.append(f"{k}={v}")
             config["Env"] = temp
 
-        await self.client.containers.run(name=name, config=config)
+        cont = await self.client.containers.run(name=name, config=config)
+
         if gw:
             status = self.get_status(name)
 
             # gateway_route(id)
+        return cont
 
     async def get_labels(self, id):
         container = await self.get(id)
         temp = await container.show()
         return search_key(temp, "Labels")
 
-    async def add_log_task(self, name, stdout=True, stderr=True, observers=None):
-        container = await self.get(name)
+    async def add_log_task(self, name, container, stdout=True, stderr=True, observers=None):
+        # container = await self.get(name)
         observers = observers or []
         if container:
             async for ev in container.log(stdout=stdout, stderr=stderr, follow=True):
@@ -236,7 +252,6 @@ async def log(v):
 
 async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
     try:
-        client.add_observer(lc)
         # task = asyncio.create_task(client._listen())
 
         # Building phase
@@ -248,9 +263,10 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
         # Running main project
 
         if success:
+            lc.remove_log(f"{p.name}:builder")
+            lc.add_log(p.name)
 
             exposed = await client.exposed_image(p.name)
-            print("EXXX", p.name, exposed)
             if len(exposed) == 0:
                 raise Exception("No ports exposed")
             if len(exposed) != 1:
@@ -258,23 +274,25 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
             port = exposed[0]
 
             if DEVELOPMENT:
-                await client.run(p.name, p.name, network="loko", ports={port: None},
-                                 labels=dict(type="loko_project", parent=p.name))
+                cont = await client.run(p.name, p.name, network="loko", ports={port: None},
+                                        labels=dict(type="loko_project", parent=p.name))
                 exposed_cont = await client.exposed(p.name)
                 print(exposed_cont)
                 if exposed_cont:
                     gateway_route(p.name, "localhost", exposed_cont)
             else:
-                await client.run(p.name, p.name, network="loko",
-                                 labels=dict(type="loko_project", parent=p.name))
+                cont = await client.run(p.name, p.name, network="loko",
+                                        labels=dict(type="loko_project", parent=p.name))
                 gateway_route(p.name, port=port)
+            asyncio.create_task(client.add_log_task(p.name, cont, stdout=False, stderr=True, observers=[lc]))
+            # asyncio.create_task(client.add_log_task(p.name, cont, stdout=True, stderr=False, observers=[lc]))
 
             # Running side containers
             config_path = p / "config.json"
             if config_path.exists():
                 with config_path.open() as inp:
                     config = json.load(inp)
-                    for side_name, side_config in config.get("side_containers").items():
+                    for side_name, side_config in config.get("side_containers", {}).items():
                         print(side_name, side_config)
                         final_name = f"{p.name}_{side_name}"
                         lc.add_log(final_name)
@@ -287,22 +305,20 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
                                 await client.pull(image, final_name, lc)
                         else:
                             raise Exception(f"Specify an image for '{side_name}'")
-                        await client.run(final_name, **side_config, network="loko",
-                                         labels=dict(type="loko_side_container", parent=p.name))
+                        cont = await client.run(final_name, **side_config, network="loko",
+                                                labels=dict(type="loko_side_container", parent=p.name), path=p)
                         asyncio.create_task(
-                            client.add_log_task(final_name, stdout=False, stderr=True, observers=[lc]))
+                            client.add_log_task(final_name, cont, stdout=False, stderr=True, observers=[lc]))
                         asyncio.create_task(
-                            client.add_log_task(final_name, stdout=True, stderr=False, observers=[lc]))
+                            client.add_log_task(final_name, cont, stdout=True, stderr=False, observers=[lc]))
 
-            lc.add_log(p.name)
-            asyncio.create_task(client.add_log_task(p.name, stdout=False, stderr=True, observers=[lc]))
-            asyncio.create_task(client.add_log_task(p.name, stdout=True, stderr=False, observers=[lc]))
+
 
         else:
             await lc(dict(type="log", name=f"{p.name}:builder", msg="Build failed"))
 
     except Exception as inst:
-        logging.exception(inst)
+        raise inst
 
 
 async def undeploy(p: Path, client: LokoDockerClient, lc: LogCollector):
@@ -313,10 +329,12 @@ async def undeploy(p: Path, client: LokoDockerClient, lc: LogCollector):
         lc.statuses[name] = None
         await main.kill()
     config_path = p / "config.json"
+    while await client.exists(name):
+        await asyncio.sleep(.1)
     if config_path.exists():
         with config_path.open() as inp:
             config = json.load(inp)
-            for side_name, side_config in config.get("side_containers").items():
+            for side_name, side_config in config.get("side_containers", {}).items():
                 final_name = f"{p.name}_{side_name}"
                 side = await client.get(final_name)
                 if side:

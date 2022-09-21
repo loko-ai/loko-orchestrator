@@ -139,7 +139,6 @@ class Processor:
         pass
 
     def pipe(self, processor, output="output", input="input"):
-        print("PIPING", self.name, processor.name, output, input)
 
         self.pipes[output].append((input, processor))
         processor.piped_from(self, output, input)

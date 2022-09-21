@@ -2,12 +2,16 @@ import json
 import os
 import shutil
 from abc import abstractmethod
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import List
 from uuid import uuid4
 
+import aiohttp
+
 from loko_orchestrator.business.docker_ext import LokoDockerClient, LogCollector
+from loko_orchestrator.config.constants import GATEWAY, EXTERNAL_GATEWAY
 from loko_orchestrator.utils.dict_utils import ObjectDict
 
 from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template
@@ -106,7 +110,7 @@ class FSProjectDAO(ProjectDAO):
         self.ext = ext
         self.deployed = {}
 
-    def all(self, info=None) -> List[str]:
+    async def all(self, client: LokoDockerClient, info=None) -> List[str]:
         ret = []
         if not self.path.exists():
             return ret
@@ -124,7 +128,7 @@ class FSProjectDAO(ProjectDAO):
                     m["last_modify"] = p.last_modify
                     m["description"] = p.description
                     m["version"] = p.version
-                    m['deployed'] = self.is_deployed(el.name)
+                    m['deployed'] = await self.is_deployed(el.name, client)
                     ret.append(m)
                 else:
                     ret.append(p.name)
@@ -153,13 +157,15 @@ class FSProjectDAO(ProjectDAO):
                 raise e
         return prj
 
-    def save(self, project: Project):
+    def save(self, project: Project, new_project=False):
         # project.last_modify = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
         logger.debug(f"saving project..{project.name} -- {project.id}")
         path = self.path / project.id
+        if new_project and path.exists():
+            raise Exception(f"Project '{project.id}' already existing")
         if not path.exists():
             path.mkdir(exist_ok=True, parents=True)
-            for p in ["extensions", "dao", "business", "services", "model", "utils", "config"]:
+            for p in ["extensions", "dao", "business", "services", "model", "utils", "config", "apps", "tests"]:
                 np = path / p
                 np.mkdir(exist_ok=True, parents=True)
                 (np / "__init__.py").touch()
@@ -220,13 +226,18 @@ class FSProjectDAO(ProjectDAO):
 
         conf = self.path / id / "extensions" / "components.json"
         print("Project", conf, conf.exists())
+        groups = defaultdict(list)
         if conf.exists():
             with open(conf) as comp:
                 for d in json.load(comp):
+                    group = d.get("group", "Custom")
                     c = klass(**d)
-                    custom.append(c)
+                    groups[group].append(c)
                     # FACTORY[c.name] = c
-        return [dict(group="Custom", components=custom)]
+        ret = []
+        for k, v in groups.items():
+            ret.append(dict(group=k, components=v))
+        return ret
 
     def get_extensions(self, id):
         if self.has_extensions(id):
@@ -240,7 +251,58 @@ class FSProjectDAO(ProjectDAO):
         p = self.path / id / "extensions/components.json"
         return p.exists()
 
-    def new_extension(self, id):
+    async def get_guis(self, id, client: LokoDockerClient):
+        # Main gui
+        ret = []
+
+        print("Main", ret)
+        # Sides guis
+        p = self.path / id / "config.json"
+        if not await client.is_deployed(id):
+            return []
+            """async with aiohttp.ClientSession() as session:
+                internal_url = f"{GATEWAY}/routes/{id}/web/index.html"
+                external_url = f"{EXTERNAL_GATEWAY}/routes/{id}/web/index.html"
+                async with session.get(internal_url) as resp:
+                    print(resp.status)
+                    if resp.status == 200:
+                        ret.append(dict(name="main gui", url=external_url))"""
+        if p.exists():
+            with p.open() as o:
+                config = json.load(o)
+                # Main gui
+                main = config.get("main", {})
+                main_gui = main.get("gui")
+                if main_gui:
+                    name = main_gui.get("name", "Main gui")
+                    path = main_gui.get("path", "web/index.html")
+                    if path.startswith("/"):
+                        path = path[1:]
+
+                    external_url = f"{EXTERNAL_GATEWAY}/routes/{id}/{path}"
+                    ret.append(dict(name=name, url=external_url))
+
+                for side, side_config in config.get("side_containers", {}).items():
+                    gui = side_config.get("gui")
+                    print(side, gui)
+                    side_name = f"{id}_{side}"
+                    if gui:
+                        gw = gui.get("gw", False)
+                        path = gui.get("path", "")
+                        if path.startswith("/"):
+                            path = path[1:]
+                        name = gui.get("name")
+                        if await client.exists(side_name):
+                            if gw:
+                                url = f"{EXTERNAL_GATEWAY}/routes/{side_name}/{path}"
+                                ret.append(dict(name=name, url=url))
+                            else:
+                                exposed = await client.exposed(side_name)
+
+                                ret.append(dict(name=name, url=f"http://localhost:{exposed}/{path}"))
+        return ret
+
+    def new_extension(self, id, name):
         p = self.path / id
         if p.exists():
 
@@ -256,10 +318,17 @@ class FSProjectDAO(ProjectDAO):
                     if el.name == "services.py":
                         (p / "services").mkdir(exist_ok=True)
                         shutil.copy(el, p / "services/services.py")
-
+                    elif el.name == "components.json":
+                        with el.open() as ext:
+                            temp = json.load(ext)
+                            temp[0]['name'] = name
+                            with open(np, "w") as oo:
+                                json.dump(temp, oo)
                     else:
                         shutil.copy(el, np)
+            print("Config")
             for el in (exts / "config").iterdir():
+                print(el)
                 np = p / el.name
                 if not np.exists():
                     shutil.copy(el, np)
@@ -268,35 +337,18 @@ class FSProjectDAO(ProjectDAO):
         else:
             raise Exception(f"{id} not found")
 
-    async def deploy(self, id, client: LokoDockerClient, logs: LogCollector):
+    def deploy(self, id):
+        self.deployed[id] = True
+
+    def undeploy(self, id):
+        self.deployed[id] = False
+
+    async def is_deployed(self, id, client: LokoDockerClient):
         if self.has_extensions(id):
-            path = self.path / id
-            if not path.exists():
-                raise Exception(f"Project '{id}' not found")
-
-            # Build phase
-            builder_id = f"{id}:builder"
-            logs.add_log(builder_id)
-            result = await client.build(path)
-            if result:
-                # If the build is successful remove the logs and run the project
-                logs.remove_log(builder_id)
-                logs.add_log(id)
-                await client.run(id, id, network="loko", labels=['loko_project'])
-
-
+            return id in await client.list_names()
         else:
-            self.deployed[id] = True
-
-    async def undeploy(self, id):
-
-        if self.has_extensions(id):
-            pass
-        else:
-            self.deployed[id] = False
-
-    async def is_deployed(self, id):
-        return self.deployed.get(id, False)
+            print(self.deployed)
+            return self.deployed.get(id, False)
 
 
 class TemplateDAO(FSProjectDAO):

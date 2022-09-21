@@ -11,6 +11,7 @@ class SharedExtensionsDAO:
     def __init__(self, path: Path, gw):
         self.path = path
         self.gw = gw
+        self.deployed = {}
 
     def all(self):
         for el in self.path.iterdir():
@@ -20,7 +21,7 @@ class SharedExtensionsDAO:
                     yield el.name
 
     async def status(self, id):
-        client = aiodocker.Docker()
+        """client = aiodocker.Docker()
         try:
             await client.containers.get(id)
             return "running"
@@ -28,15 +29,20 @@ class SharedExtensionsDAO:
             print(inst)
             return "not running"
         finally:
-            await client.close()
+            await client.close()"""
+        print(id, self.deployed.get(id))
+        return self.deployed.get(id)
 
     async def deploy(self, id):
+        self.deployed[id] = "running"
 
-        await build_extension_image(self.path / id)
-        await run_extension_image(id, self.gw)
+    # await build_extension_image(self.path / id)
+    # await run_extension_image(id, self.gw)
 
     async def undeploy(self, id):
-        if await self.status(id) == "running":
+        if id in self.deployed:
+            del self.deployed[id]
+        """if await self.status(id) == "running":
             client = aiodocker.Docker()
             container = await client.containers.get(id)
             await container.kill()
@@ -45,7 +51,7 @@ class SharedExtensionsDAO:
                 try:
                     await el.kill()
                 except Exception as inst:
-                    print(id, inst)
+                    print(id, inst)"""
 
     def delete(self, id):
         ext = self.path / id

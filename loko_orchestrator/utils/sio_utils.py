@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 import traceback
 
 from loko_orchestrator.config.constants import GATEWAY
@@ -12,17 +14,26 @@ class Throttle:
         self.f = f
         self.task = None
         self.t = t
+        self.tasks = {}
 
     async def __call__(self, *args, **kwargs):
-        if self.task:
-            self.task.cancel()
-            self.task = None
+        _hash = json.dumps((args, kwargs))
+        task = self.tasks.get(_hash)
+        print(_hash, args, kwargs)
+        if task:
+            return
 
-        async def temp():
-            await asyncio.sleep(self.t)
-            await self.f(*args, **kwargs)
+        async def temp(tasks, _hash):
+            try:
+                await asyncio.sleep(self.t)
+                await self.f(*args, **kwargs)
+            except Exception as inst:
+                logging.exception(inst)
+            finally:
+                del tasks[_hash]
+                # print(tasks,_hash)
 
-        self.task = asyncio.create_task(temp())
+        self.tasks[_hash] = asyncio.create_task(temp(self.tasks, _hash))
 
 
 async def emit(sio, event, data):

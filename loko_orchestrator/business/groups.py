@@ -82,15 +82,11 @@ def get_components():
         print("No gateway")
         logging.exception(inst)
 
-    print(dict(group="DS4Biz", components=ds4biz))
-    print(dict(Custom=get_global_extensions()))
-
     return [dict(group="DS4Biz", components=ds4biz)] + [
         dict(group="Global", components=get_global_extensions())] + COMPONENTS
 
 
 def is_extension(path: Path):
-    print(path, list(path.glob("**/components.json")))
     return len(list(path.glob("**/components.json"))) == 1
 
 

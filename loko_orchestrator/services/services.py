@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import traceback
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -27,7 +28,7 @@ from loko_orchestrator.business.builder.aio_docker_builder import build_extensio
 from loko_orchestrator.business.builder.dockermanager import DockerManager, DockerMessageCollector
 from loko_orchestrator.business.components.commons import Custom
 from loko_orchestrator.business.converters import project2processor, cached_messages, get_project_info
-from loko_orchestrator.business.docker_ext import LokoDockerClient
+from loko_orchestrator.business.docker_ext import LokoDockerClient, undeploy
 from loko_orchestrator.business.engine import repository
 # from loko_orchestrator.config.app_config import sio, pdao, tdao, fsdao, DEBUG, \
 #    PLUGIN_DAO, services_scan, ASYNC_SESSION_TIMEOUT, GATEWAY, PORT, CORS_ON
@@ -320,17 +321,9 @@ async def connect(sid, environ):
 # @license_check
 async def projects(request):
     info = get_value(request.args, "info", "none", str).capitalize()
-    prjs_info = pdao.all(info=eval(info))
-    # manager: DockerManager = app.ctx.docker_manager
     client: LokoDockerClient = app.ctx.client
-    deployed = await client.list_names()
-    print("DEPLOYED", deployed)
-    for p in prjs_info:
-        if (isinstance(p, dict)):
-            p['deployed'] = p['name'] in deployed
-
-    res = prjs_info
-    return sjson(res)
+    prjs_info = await pdao.all(client=client, info=eval(info))
+    return sjson(prjs_info)
 
 
 @bp.get("/projects/<id>")
@@ -338,24 +331,32 @@ async def projects(request):
 async def project_by_id(request, id):
     temp = pdao.get(id)
     client: LokoDockerClient = app.ctx.client
-    deployed = await client.list_names()
-    temp.deployed = id in deployed
+    temp.deployed = await client.exists(id)
 
     return myjson(temp)
 
 
 @bp.delete("/projects/<id>")
-def delete_project(request, id):
+async def delete_project(request, id):
     pdao.delete(id)
+    client: LokoDockerClient = app.ctx.client
+    log_collector: LogCollector = app.ctx.log_collector
+    if pdao.has_extensions(id):
+        pdao.undeploy(id)
+        await undeploy(pdao.path / id, client, log_collector)
+    else:
+        log_collector.remove_log(id)
+        pdao.undeploy(id)
     return sjson(dict(project=id))
 
 
 @bp.post("/projects")
 @doc.consumes(doc.JsonBody(), location="body")
-def save_project(request):
+async def save_project(request):
     # global PROJECTS_LIMIT    non serve se non fai un assegnamento alla variabile
     # check_prj_duplicate(req["name"])  # check if the project id is already present
-    if len(pdao.all()) < LICENSE_MANAGER.projects_limit():
+    client: LokoDockerClient = app.ctx.client
+    if len(await pdao.all(client=client)) < LICENSE_MANAGER.projects_limit():
         p = Project(**request.json)
         pdao.save(p)
         res = p.info()
@@ -409,12 +410,20 @@ async def update_project(request, id):
 
 @bp.patch("/projects/<id>")
 @doc.consumes(doc.JsonBody(), location="body")
-def update_info_project(request, id):
+async def update_info_project(request, id):
     new_name = request.json["new_name"]
     prj = pdao.get(id)
     """if prj.name != new_name:
         check_prj_duplicate(new_name)"""
     pdao.rename(id, new_name)
+    client: LokoDockerClient = app.ctx.client
+    log_collector: LogCollector = app.ctx.log_collector
+    if pdao.has_extensions(id):
+        pdao.undeploy(id)
+        await undeploy(pdao.path / id, client, log_collector)
+    else:
+        log_collector.remove_log(id)
+        pdao.undeploy(id)
     return sjson(pdao.get(new_name).info())
 
 
@@ -475,8 +484,9 @@ async def component_preview(request, edge_id):
 
 
 @bp.get("/resources")
-def resources(request):
-    prjs = pdao.all(info=True)
+async def resources(request):
+    client: LokoDockerClient = app.ctx.client
+    prjs = pdao.all(client=client, info=True)
     prjs_info = [pdao.get(p["id"]).info() for p in prjs]
     templates = tdao.all()
     templates_info = [tdao.get(t).info() for t in templates]
@@ -486,7 +496,10 @@ def resources(request):
 
 @bp.get("/components/<id>")
 def components(request, id):
-    return myjson(get_components() + pdao.get_local_components(id, Custom))
+    ret = defaultdict(list)
+    for c in get_components() + pdao.get_local_components(id, Custom):
+        ret[c['group']].extend(c['components'])
+    return myjson([dict(group=k, components=v) for (k, v) in ret.items()])
 
 
 """@bp.get("/forms")
@@ -526,9 +539,14 @@ async def message(request, project_id):
     # print("USER OBJ ", user)
     # logger.debug("USER OBJ %s" % user)
     id = request.json['id']
+    sent_value = request.json.get("value")
     project = pdao.get(project_id)
     now = datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
     alias = None
+    client: LokoDockerClient = app.ctx.client
+    # deployed = await client.list_names()
+    if not await pdao.is_deployed(project_id, client):
+        raise Exception(f"The project {project_id} is not running")
 
     try:
         pid, nodes, edges, graphs = get_project_info(project)
@@ -565,7 +583,7 @@ async def message(request, project_id):
 
     loop = asyncio.get_event_loop()
     # tid = str(uuid4())
-    t = loop.create_task(task(id, processors[id].consume(None, flush=True)))
+    t = loop.create_task(task(id, processors[id].consume(sent_value, flush=True)))
     # t=loop.run_in_executor(POOL,task(tid,processors[id].consume(None)))
     flows[id] = t
     flows_info[id] = dict(startedAt=now, graph=graphs[id], project=project_id, source=alias, user="user")
@@ -744,8 +762,9 @@ def copy(request, path):
 @bp.post("/extensions/<id>")
 @doc.consumes(doc.String(name="id"), location="path", required=True)
 def build(request, id):
+    body = request.json
     print("Building new extension")
-    pdao.new_extension(id)
+    pdao.new_extension(id, body.get("name", "Extensions"))
 
     return myjson("ok")
 
@@ -770,18 +789,19 @@ async def b(app: Sanic, loop):
     # app.add_task(mc.event_task())
     # app.add_task(mc.dequeue())
     # app.add_task(mc.update_tasks())
-    async def l(v):
+    """async def l(v):
         name = v.get("name")
-        print(log_collector.get_logs(name)[-1])
+        print(log_collector.get_logs(name)[-1])"""
 
     async def temp(v):
-        print(v)
         await sio.emit(v.get("type"), v)
 
     event_notifier = Throttle(temp, t=1)
 
     client = LokoDockerClient()
     log_collector = LogCollector([event_notifier])
+    client.add_observer(log_collector)
+
     app.ctx.client = client
     app.ctx.log_collector = log_collector
     app.add_task(client.listen())
@@ -827,8 +847,8 @@ async def generic_exception(request, exception):
         j = dict(error=e)
         if not isinstance(exception, sanic.exceptions.NotFound):
             # logger.debug(traceback.format_exc())
-            # logging.exception(exception)
-            pass
+            logging.exception(exception)
+
         else:
             logger.debug(f'NOTFOUND EXCEPTION: {e}')
         status_code = getattr(exception, "status_code", None) or 500
@@ -844,7 +864,7 @@ add_deployment_services(app, bp, sio)
 add_git_services(app, bp, sio)
 app.blueprint(bp)
 
-# app.error_handler.add(Exception, generic_exception)
+app.error_handler.add(Exception, generic_exception)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", access_log=False, port=PORT, debug=DEBUG, auto_reload=DEBUG)

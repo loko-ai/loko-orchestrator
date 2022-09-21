@@ -92,7 +92,6 @@ async def run_sides(path, gateway=None):
 
                 await run_container(name, labels=dict(type=f"{path.name}_side"), config=tconfig, path=path)
                 port = side_config.get("exposed")
-                print("A" * 100, gateway, name, expose_to_gateway, name in expose_to_gateway, port)
                 if gateway and name in expose_to_gateway and port:
                     resp = requests.post(gateway + "/rules", json={
                         "name": name,

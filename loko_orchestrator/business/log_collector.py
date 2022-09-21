@@ -19,10 +19,11 @@ class LogCollector:
 
     async def __call__(self, value):
         if value.get("Type") == "container":
-            status = value['status']
+            status = f"Container event: {value['status']}"
             name = value['Actor']['Attributes']['name']
             if name in self.logs:
-                self.logs[name].append(dict(type="log", channel="DEBUG", name=name, msg=status, id=str(uuid.uuid4())))
+                self.logs[name].append(
+                    dict(type="log", channel="DEBUG", name=name, msg=status, log_id=str(uuid.uuid4())))
                 self.statuses[name] = status
                 if self.observers:
                     for o in self.observers:
@@ -33,7 +34,8 @@ class LogCollector:
             name = value.get("name")
             if name in self.logs:
                 self.logs[name].append(
-                    dict(type="log", channel=value.get('channel', 'DEBUG'), msg=value.get('msg'), id=str(uuid.uuid4())))
+                    dict(type="log", channel=value.get('channel', 'DEBUG'), msg=value.get('msg'),
+                         log_id=str(uuid.uuid4())))
                 if self.observers:
                     for o in self.observers:
                         await o(dict(type="logs", name=name))

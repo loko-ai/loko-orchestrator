@@ -1,6 +1,4 @@
-import uuid
 from datetime import datetime
-from pprint import pprint
 
 LATEST_PRJ_VERSION = "1.0.0"
 
