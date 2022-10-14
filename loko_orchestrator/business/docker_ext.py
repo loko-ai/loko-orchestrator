@@ -143,7 +143,7 @@ class LokoDockerClient:
             container = await self.get(name)
             # await container.stop()
             await container.kill()
-        config = dict(Image=image)
+        config = dict(Image=image, Hostname=name)
         hc = {}
         while await self.exists(name):
             asyncio.sleep(0.5)
@@ -261,6 +261,12 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
         success = await client.build(p, lc)
 
         # Running main project
+        config_path = p / "config.json"
+        config = {}
+
+        if config_path.exists():
+            with config_path.open() as inp:
+                config = json.load(inp)
 
         if success:
             lc.remove_log(f"{p.name}:builder")
@@ -272,45 +278,47 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
             if len(exposed) != 1:
                 raise Exception("Too many ports exposed")
             port = exposed[0]
+            main = config.get("main", {})
 
             if DEVELOPMENT:
                 cont = await client.run(p.name, p.name, network="loko", ports={port: None},
-                                        labels=dict(type="loko_project", parent=p.name))
+                                        labels=dict(type="loko_project", parent=p.name), path=p, **main)
                 exposed_cont = await client.exposed(p.name)
                 print(exposed_cont)
                 if exposed_cont:
                     gateway_route(p.name, "localhost", exposed_cont)
             else:
                 cont = await client.run(p.name, p.name, network="loko",
-                                        labels=dict(type="loko_project", parent=p.name))
+                                        labels=dict(type="loko_project", parent=p.name), path=p, **main)
                 gateway_route(p.name, port=port)
             asyncio.create_task(client.add_log_task(p.name, cont, stdout=False, stderr=True, observers=[lc]))
-            # asyncio.create_task(client.add_log_task(p.name, cont, stdout=True, stderr=False, observers=[lc]))
+            asyncio.create_task(client.add_log_task(p.name, cont, stdout=True, stderr=False, observers=[lc]))
 
             # Running side containers
-            config_path = p / "config.json"
-            if config_path.exists():
-                with config_path.open() as inp:
-                    config = json.load(inp)
-                    for side_name, side_config in config.get("side_containers", {}).items():
-                        print(side_name, side_config)
-                        final_name = f"{p.name}_{side_name}"
-                        lc.add_log(final_name)
+            if config:
+                for side_name, side_config in config.get("side_containers", {}).items():
+                    print(side_name, side_config)
+                    final_name = f"{p.name}_{side_name}"
+                    lc.add_log(final_name)
 
-                        print(final_name)
-                        image = side_config.get('image')
-                        if image:
-                            if not await client.image_exists(image):
-                                print("Doesn't exist" * 20, image)
-                                await client.pull(image, final_name, lc)
-                        else:
-                            raise Exception(f"Specify an image for '{side_name}'")
-                        cont = await client.run(final_name, **side_config, network="loko",
-                                                labels=dict(type="loko_side_container", parent=p.name), path=p)
-                        asyncio.create_task(
-                            client.add_log_task(final_name, cont, stdout=False, stderr=True, observers=[lc]))
-                        asyncio.create_task(
-                            client.add_log_task(final_name, cont, stdout=True, stderr=False, observers=[lc]))
+                    print(final_name)
+                    image = side_config.get('image')
+                    if image:
+                        if not await client.image_exists(image):
+                            print("Doesn't exist" * 20, image)
+                            await client.pull(image, final_name, lc)
+                    else:
+                        raise Exception(f"Specify an image for '{side_name}'")
+                    cont = await client.run(final_name, **side_config, network="loko",
+                                            labels=dict(type="loko_side_container", parent=p.name), path=p)
+                    if side_config.get("gw"):
+                        exposed_cont = await client.exposed(final_name) or 8080
+                        print(final_name, "Routing to gw")
+                        gateway_route(final_name, exposed_cont)
+                    asyncio.create_task(
+                        client.add_log_task(final_name, cont, stdout=False, stderr=True, observers=[lc]))
+                    asyncio.create_task(
+                        client.add_log_task(final_name, cont, stdout=True, stderr=False, observers=[lc]))
 
 
 
@@ -345,17 +353,12 @@ async def undeploy(p: Path, client: LokoDockerClient, lc: LogCollector):
 
 
 async def main():
-    p = Path("/home/fulvio/loko/projects/ciccio")
     client = LokoDockerClient()
-    task = asyncio.create_task(client.listen())
+    cont = await client.get("bbbb")
+    print(cont)
+    async for ev in cont.log(stdout=True, stderr=True, follow=True):
+        print(ev)
 
-    async def l(v):
-        name = v.get("name")
-        print(log_collector.get_logs(name)[-1])
-
-    log_collector = LogCollector([l])
-    await deploy(p, client, log_collector)
-    await task
     await client.close()
 
 

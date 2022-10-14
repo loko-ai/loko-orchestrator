@@ -5,6 +5,7 @@ import traceback
 from functools import partial
 from io import StringIO
 from pathlib import Path
+import sanic.request
 from dict_path import DictPath
 from sanic.exceptions import SanicException
 
@@ -330,12 +331,16 @@ class Custom(Component):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", project_id, service)
-                logger.debug(("Calling url", url))
+
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",
                                                            data={"file": o,
                                                                  "args": StringIO(json.dumps(kwargs))})
+                elif isinstance(v, sanic.request.File):
+                    resp = await async_request.request(url, "POST",
+                                                       data={"file": v.body,
+                                                             "args": StringIO(json.dumps(kwargs))})
                 else:
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp
@@ -366,7 +371,6 @@ class SharedExtension(Component):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", self.pname, service)
-                logger.debug(("Calling shared extension url", url))
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",

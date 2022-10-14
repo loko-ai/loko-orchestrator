@@ -24,6 +24,8 @@ class LogCollector:
             if name in self.logs:
                 self.logs[name].append(
                     dict(type="log", channel="DEBUG", name=name, msg=status, log_id=str(uuid.uuid4())))
+                if len(self.logs[name]) > 250:
+                    self.logs[name] = self.logs[name][-200:]
                 self.statuses[name] = status
                 if self.observers:
                     for o in self.observers:

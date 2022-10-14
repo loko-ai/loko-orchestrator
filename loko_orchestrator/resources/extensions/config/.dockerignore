@@ -1,3 +1,10 @@
+.*
 venv
-.idea
+!.gitignore
+!.dockerignore
+!.env
+!.env.*
+*.pyc
+dist
 __pycache__
+**/node_modules

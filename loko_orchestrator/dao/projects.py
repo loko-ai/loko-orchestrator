@@ -154,7 +154,7 @@ class FSProjectDAO(ProjectDAO):
                 prj.name = id
             except Exception as e:
                 logger.exception("impossible to load %s" % str(self.path / (id + self.ext)))
-                raise e
+                raise Exception("impossible to load %s" % str(self.path / (id + self.ext)))
         return prj
 
     def save(self, project: Project, new_project=False):
@@ -227,13 +227,16 @@ class FSProjectDAO(ProjectDAO):
         conf = self.path / id / "extensions" / "components.json"
         print("Project", conf, conf.exists())
         groups = defaultdict(list)
-        if conf.exists():
-            with open(conf) as comp:
-                for d in json.load(comp):
-                    group = d.get("group", "Custom")
-                    c = klass(**d)
-                    groups[group].append(c)
-                    # FACTORY[c.name] = c
+        try:
+            if conf.exists():
+                with open(conf) as comp:
+                    for d in json.load(comp):
+                        group = d.get("group", "Custom")
+                        c = klass(**d)
+                        groups[group].append(c)
+                        # FACTORY[c.name] = c
+        except Exception as inst:
+            raise Exception(f"Problems in loading local components: {inst}")
         ret = []
         for k, v in groups.items():
             ret.append(dict(group=k, components=v))
@@ -324,6 +327,8 @@ class FSProjectDAO(ProjectDAO):
                             temp[0]['name'] = name
                             with open(np, "w") as oo:
                                 json.dump(temp, oo)
+                    elif el.name == "config.json":
+                        shutil.copy(el, p)
                     else:
                         shutil.copy(el, np)
             print("Config")
