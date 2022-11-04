@@ -62,7 +62,6 @@ def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwar
             processors[n.id] = DummyProcessor(id=n.id, name=n.name)
             errors[n.id] = inst
         comp = processors[n.id]
-        print("DATTAAAAA", n.name, n.id)
         notifier = BatchedNotifier(pid, n.values.get("alias") or n.name, n.id, n.options["group"], sio, "messages",
                                    loop=asyncio.get_event_loop(),
                                    time=.25, max_messages=200, debug=bool(n.values.get("debug")), tab=tab)

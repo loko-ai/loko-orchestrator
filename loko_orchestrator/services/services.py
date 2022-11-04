@@ -77,6 +77,9 @@ app.config["API_SECURITY_DEFINITIONS"] = {
     "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "Authorization"}
 }
 
+app.config["REQUEST_MAX_SIZE"] = 20000000000
+app.config["REQUEST_TIMEOUT"] = 172800
+
 if CORS_ON:
     CORS(app, expose_headers=["Range"])
 
@@ -762,6 +765,7 @@ def preview(request, path=None):
                             delimiter=separator)
 
     return sjson(ret)
+
 
 @bp.post("/copy/<path:path>")
 @doc.consumes(doc.Object(name="newPath", cls=dict), location="body")
