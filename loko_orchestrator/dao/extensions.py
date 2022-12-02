@@ -1,10 +1,13 @@
 import asyncio
+import json
 import shutil
 from pathlib import Path
 
 import aiodocker
 
 from loko_orchestrator.business.builder.aio_docker_builder import build_extension_image, run_extension_image
+from loko_orchestrator.business.docker_ext import LokoDockerClient
+from loko_orchestrator.config.constants import EXTERNAL_GATEWAY
 
 
 class SharedExtensionsDAO:
@@ -21,41 +24,62 @@ class SharedExtensionsDAO:
                     yield el.name
 
     async def status(self, id):
-        """client = aiodocker.Docker()
-        try:
-            await client.containers.get(id)
-            return "running"
-        except Exception as inst:
-            print(inst)
-            return "not running"
-        finally:
-            await client.close()"""
-        print(id, self.deployed.get(id))
         return self.deployed.get(id)
 
     async def deploy(self, id):
         self.deployed[id] = "running"
 
-    # await build_extension_image(self.path / id)
-    # await run_extension_image(id, self.gw)
-
     async def undeploy(self, id):
         if id in self.deployed:
             del self.deployed[id]
-        """if await self.status(id) == "running":
-            client = aiodocker.Docker()
-            container = await client.containers.get(id)
-            await container.kill()
-            for el in await client.containers.list(filters={"label": [f"type={id}_side"]}):
-                print(el)
-                try:
-                    await el.kill()
-                except Exception as inst:
-                    print(id, inst)"""
 
     def delete(self, id):
         ext = self.path / id
         shutil.rmtree(ext)
+
+    async def get_guis(self, id, client: LokoDockerClient):
+        # Main gui
+        ret = []
+        # Sides guis
+        p = self.path / id / "config.json"
+        print(p, p.exists())
+        if not await client.is_deployed(id):
+            return []
+        if p.exists():
+            with p.open() as o:
+                config = json.load(o)
+                # Main gui
+                print(config)
+                main = config.get("main", {})
+                main_gui = main.get("gui")
+                if main_gui:
+                    name = main_gui.get("name", f"{id} gui")
+                    path = main_gui.get("path", "web/index.html")
+                    if path.startswith("/"):
+                        path = path[1:]
+
+                    external_url = f"{EXTERNAL_GATEWAY}/routes/{id}/{path}"
+                    ret.append(dict(name=name, url=external_url))
+                for side, side_config in config.get("side_containers", {}).items():
+                    gui = side_config.get("gui")
+                    print("Side", side, gui)
+                    side_name = f"{id}_{side}"
+                    if gui:
+                        gw = gui.get("gw", False)
+                        path = gui.get("path", "")
+                        if path.startswith("/"):
+                            path = path[1:]
+                        name = gui.get("name")
+                        if await client.exists(side_name):
+                            if gw:
+                                url = f"{EXTERNAL_GATEWAY}/routes/{side_name}/{path}"
+                                ret.append(dict(name=name, url=url))
+                            else:
+                                exposed = await client.exposed(side_name)
+
+                                ret.append(dict(name=name, url=f"http://localhost:{exposed}/{path}"))
+        print(ret)
+        return ret
 
 
 if __name__ == "__main__":

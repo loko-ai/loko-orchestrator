@@ -101,7 +101,9 @@ class LokoDockerClient:
             return None
 
     async def pull(self, id, final_name=None, log_collector: LogCollector = None):
-        print(id, final_name)
+        if ":" not in id:
+            id = f"{id}:latest"
+        print("Pulling", id)
         async for line in self.client.images.pull(from_image=id, stream=True):
             if log_collector and final_name:
                 await log_collector(dict(type="log", name=final_name, msg=json.dumps(line)))
@@ -303,6 +305,8 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
 
                     print(final_name)
                     image = side_config.get('image')
+                    if ":" not in image:
+                        image = f"{image}:latest"
                     if image:
                         if not await client.image_exists(image):
                             print("Doesn't exist" * 20, image)
@@ -354,7 +358,6 @@ async def undeploy(p: Path, client: LokoDockerClient, lc: LogCollector):
 
 async def main():
     client = LokoDockerClient()
-    cont = await client.get("bbbb")
     print(cont)
     async for ev in cont.log(stdout=True, stderr=True, follow=True):
         print(ev)

@@ -31,6 +31,10 @@ default_image = 'https://raw.githubusercontent.com/loko-ai/prova_gui/master/icon
 avatar_url = "https://avatars.githubusercontent.com/u/109956019?v=4"
 
 
+def check_github_project(p):
+    return not p['private'] and "extension" in p.get("topics")
+
+
 def add_deployment_services(app, bp, sio):
     @bp.get("/shared/extensions")
     async def shared_extensions(request):
@@ -38,9 +42,10 @@ def add_deployment_services(app, bp, sio):
         client: LokoDockerClient = app.ctx.client
         log_collector: LogCollector = app.ctx.log_collector
         for el in shared_extensions_dao.all():
+            guis = await shared_extensions_dao.get_guis(el, client)
             ret.append(dict(name=el, id=el, topics=[], html_url="", image=default_image,
                             owner=dict(login="loko-ai", avatar_url=avatar_url),
-                            status=await client.is_deployed(el)))
+                            status=await client.is_deployed(el), guis=guis))
         return myjson(ret)
 
     @bp.delete("/shared/extensions/<id>")
@@ -147,7 +152,7 @@ def add_deployment_services(app, bp, sio):
         async with aiohttp.ClientSession() as session:
             async with session.get(github_url) as resp:
                 data = await resp.json()
-                data = [x for x in data if not x['private'] and not x['name'] in already]
+                data = [x for x in data if check_github_project(x) and not x['name'] in already]
                 await asyncio.gather(*[set_image(x, session) for x in data])
 
         return myjson(data)
