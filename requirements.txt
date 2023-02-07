@@ -11,3 +11,4 @@ sanic
 sanic-cors
 sanic-jwt
 sanic-openapi
+loguru

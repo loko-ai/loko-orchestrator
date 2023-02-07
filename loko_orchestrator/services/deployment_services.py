@@ -27,7 +27,7 @@ def myjson(o, headers=None):
 
 
 github_url = "https://api.github.com/orgs/loko-ai/repos"
-default_image = 'https://raw.githubusercontent.com/loko-ai/prova_gui/master/icon.png';
+default_image = 'https://raw.githubusercontent.com/loko-ai/prova_gui/master/icon.png'
 avatar_url = "https://avatars.githubusercontent.com/u/109956019?v=4"
 
 
@@ -46,6 +46,7 @@ def add_deployment_services(app, bp, sio):
             ret.append(dict(name=el, id=el, topics=[], html_url="", image=default_image,
                             owner=dict(login="loko-ai", avatar_url=avatar_url),
                             status=await client.is_deployed(el), guis=guis))
+            ret = sorted(ret, key=lambda x: x['name'])
         return myjson(ret)
 
     @bp.delete("/shared/extensions/<id>")
@@ -150,9 +151,10 @@ def add_deployment_services(app, bp, sio):
     async def get_available_applications(request):
         already = set(shared_extensions_dao.all())
         async with aiohttp.ClientSession() as session:
-            async with session.get(github_url) as resp:
+            async with session.get(github_url, params=dict(per_page=100)) as resp:
                 data = await resp.json()
                 data = [x for x in data if check_github_project(x) and not x['name'] in already]
+                data = sorted(data, key=lambda x: x['name'])
                 await asyncio.gather(*[set_image(x, session) for x in data])
 
         return myjson(data)

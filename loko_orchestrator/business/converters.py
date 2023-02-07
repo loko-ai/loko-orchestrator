@@ -1,6 +1,6 @@
-import logging
-import traceback
 from collections import defaultdict
+
+from loguru import logger
 
 from loko_orchestrator.business.components.io import WireIn, WireOut
 # from loko_orchestrator.business.groups import FACTORY
@@ -11,7 +11,6 @@ from loko_orchestrator.business.engine import Notifier, BatchedNotifier, Message
 import asyncio
 
 from loko_orchestrator.model.projects import NodeInfo
-from loko_orchestrator.utils.logger_utils import logger
 
 cached_messages = {}
 
@@ -53,12 +52,11 @@ def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwar
     def create_component(n):
         cc = factory[n.name]
         try:
-            logger.debug('VALUES: {val}'.format(val=n.values))
             processors[n.id] = cc.create(id=n.id, name=n.name, gateway=GATEWAY, headers=headers, project_id=pid,
                                          **n.values)
         except Exception as inst:
             # print(traceback.format_exc())
-            logging.exception(inst)
+            logger.exception(inst)
             processors[n.id] = DummyProcessor(id=n.id, name=n.name)
             errors[n.id] = inst
         comp = processors[n.id]
@@ -66,7 +64,7 @@ def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwar
                                    loop=asyncio.get_event_loop(),
                                    time=.25, max_messages=200, debug=bool(n.values.get("debug")), tab=tab)
         for output in n.outputs:
-            print(n.name, n.id, notifier.sid, output)
+            logger.debug((n.name, n.id, notifier.sid, output))
             comp.pipe(notifier, output=output)
 
         # Il componente debug non ha outputs
@@ -105,14 +103,13 @@ def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwar
             start_c = "'" + alias + "' (" + nodes[id].name + ')'
         else:
             start_c = nodes[id].name
-        logging.warning(
+        logger.warning(
             f"COMPONENT: {start_c} - ERROR: {errors.get(id)}")
         raise Exception(f"{id} {alias or nodes[id].name} {nodes[id].options['group']} {errors.get(id)}")
 
     while queue:
         s = queue.pop(0)
         n1 = nodes[s]
-        logger.debug("START %s" % str(nodes[s].values.get('alias') or nodes[s].name))
         # print('START', nodes[s].values.get('alias') or nodes[s].name)
         for neighbour_dict in edges[s]:
             neighbour = neighbour_dict['end']
@@ -121,14 +118,13 @@ def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwar
                 alias = nodes[neighbour].values.get('alias')
                 name = nodes[neighbour].name
                 # print('END', nodes[neighbour].values.get('alias') or nodes[neighbour].name)
-                logger.debug("END %s" % str(nodes[neighbour].values.get('alias') or nodes[neighbour].name))
                 create_component(n2)
                 if isinstance(processors[n2.id], DummyProcessor):
                     if alias:
                         start_c = "'" + alias + "' (" + nodes[n2.id].name + ')'
                     else:
                         start_c = nodes[n2.id].name
-                    logging.warning(
+                    logger.warning(
                         f"COMPONENT: {start_c} - ERROR: {errors.get(n2.id)}")
                     raise Exception(f"{n2.id} {alias or nodes[n2.id].name} {n2.options['group']} {errors.get(n2.id)}")
 

@@ -4,7 +4,7 @@ import logging
 def get_logger():
     logger = logging.getLogger()
     # fhand = logging.FileHandler(fname)
-    shand = logging.StreamHandler()
+    """shand = logging.StreamHandler()
 
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     # fhand.setFormatter(formatter)
@@ -20,7 +20,7 @@ def get_logger():
 
     logging.PROCESS = 15
     logging.addLevelName(logging.PROCESS, 'PROCESS')
-    setattr(logger, 'process', lambda message, *args: logger._log(logging.PROCESS, message, args))
+    setattr(logger, 'process', lambda message, *args: logger._log(logging.PROCESS, message, args))"""
 
     return logger
 

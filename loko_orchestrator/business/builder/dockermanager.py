@@ -161,10 +161,9 @@ class DockerManager:
         self.collector = collector
 
     async def build_extension_image(self, path):
-        async with aiohttp.ClientSession(timeout=300 * 1000) as session:
+        async with aiohttp.ClientSession(timeout=10) as session:
             client = self.client
-            client.session = aiohttp.ClientSession(connector=client.connector, read_timeout=200 * 1000,
-                                                   conn_timeout=200 * 1000)
+            client.session = session
 
             path = Path(path)
             print("Tarring the file")

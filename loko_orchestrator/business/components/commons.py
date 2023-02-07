@@ -7,6 +7,7 @@ from io import StringIO
 from pathlib import Path
 import sanic.request
 from dict_path import DictPath
+from loguru import logger
 from sanic.exceptions import SanicException
 
 from loko_orchestrator.business.engine import Fun, Notifier, Parameters, repository, ArrayStream, Merger, Filter, \
@@ -325,12 +326,15 @@ class Custom(Component):
             values = options.get("values", {})
             del kwargs['options']
 
+        logger.debug(("Custom", args, kwargs))
+
         super().__init__(args=args, values=values, **kwargs)
 
     def create(self, gateway, project_id, **kwargs):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", project_id, service)
+                logger.debug(url)
 
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
@@ -345,7 +349,7 @@ class Custom(Component):
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp
             except Exception as inst:
-                raise Exception(f"Problems with extension: {inst}")
+                raise Exception(f"Problems with extension '{project_id}' - {inst}")
 
         mapping = {}
         for el in self.inputs:
@@ -365,12 +369,16 @@ class SharedExtension(Component):
             values = options.get("values", {})
             del kwargs['options']
 
+        logger.debug(("Custom", args, kwargs))
+
         super().__init__(args=args, values=values, **kwargs)
 
     def create(self, gateway, project_id, **kwargs):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", self.pname, service)
+                print(f"uRRRRRRRl {url}")
+
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",
@@ -379,13 +387,14 @@ class SharedExtension(Component):
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp
             except Exception as inst:
-                raise Exception("Problems with extension")
+                # logger.exception(inst)
+                raise Exception(f"Problems with extension '{self.pname}' - {inst}")
 
         mapping = {}
         for el in self.inputs:
             mapping[el['id']] = partial(f, input=el['id'], service=el.get("service", "")), el.get("to", "output")
 
-        return MultiFun(mapping, name=self.name)
+        return MultiFun(mapping, **kwargs)
 
 
 if __name__ == "__main__":

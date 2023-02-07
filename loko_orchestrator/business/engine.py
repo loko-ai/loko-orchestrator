@@ -19,10 +19,11 @@ import time
 from types import GeneratorType
 import json
 
+from loguru import logger
+
 from loko_orchestrator.utils.async_request import AsyncRequest
 from loko_orchestrator.utils.codeutils import flatten
 from loko_orchestrator.utils.debug_utils import ellipsis
-from loko_orchestrator.utils.logger_utils import logger
 # from ds4biz_orchestrator.utils.pathutils import to_relative
 from loko_orchestrator.utils.jsonutils import json_friendly, IDDict
 from uuid import uuid4
@@ -176,14 +177,11 @@ class Processor:
     async def consume(self, value, input="input", flush=False, output="output", **kwargs):
         ret = None
         if isinstance(value, ProcessorError):
-            print("PERROR", value)
             await self.notify(value)
         else:
             try:
                 ret = await self.process(value, input, **kwargs)
             except Exception as inst:
-                logger.debug(traceback.format_exc())
-                logging.exception(inst)
                 print("Ready to notify error", str(inst), self.name, self.id)
                 await self.notify(ProcessorError(str(inst), self.name, self.id), output=output)
                 print("Notified error", str(inst), self.name, self.id)
@@ -262,7 +260,7 @@ class HttpResponseFun(Processor):
         self.type = type
 
     async def consume(self, value, input="input", flush=False, **kwargs):
-        logger.debug("Resp %s" % repository.get())
+        print("Resp %s" % repository.get())
         ret = None
         r = repository.get()
         if isinstance(value, ProcessorError):
@@ -278,8 +276,9 @@ class HttpResponseFun(Processor):
     async def process(self, value, input="input", **kwargs):
         r = repository.get()
         resp = r.get("response")
+        print("RRRR", resp)
 
-        if resp:
+        if "response" in r:
             if isinstance(resp, RespAcc):
                 resp.append(value)
             else:
@@ -580,6 +579,9 @@ class Merger(Processor):
 
 
 async def stream(processor, result, output="output"):
+    if result == []:
+        await processor.notify(result, output=output)
+        return
     if isinstance(result, (GeneratorType, range, list, tuple)):
         for el in result:
             await processor.notify(el, output=output)
@@ -907,6 +909,7 @@ class BatchedNotifier(Processor):
                         await emit(self.clients, self.label, json_friendly([x for x in self.queue if x]))
                     else:
                         msg = [x for x in self.queue if x and x.get('type') == "error"]
+                        print("MSG", msg, self.queue)
 
                         if msg:
                             await emit(self.clients, self.label,
@@ -926,7 +929,7 @@ class BatchedNotifier(Processor):
         msg = json_friendly(value)
 
         if error:
-            print("VALUE" * 10, value, error, value.source_id, self.sid)
+            logger.debug((value.source_id, self.sid))
             if value.source_id == self.sid:
                 self.errors += 1
                 ret = dict(info, project=self.project, group=self.group, name=self.sender, type="error",
@@ -938,6 +941,7 @@ class BatchedNotifier(Processor):
             # print("-----")
             # print(ret)
         if ret:
+            print("Accodo", ret)
             if self.n <= self.max_messages:
                 self.queue.append(ret)
             if self.n == self.max_messages + 1:

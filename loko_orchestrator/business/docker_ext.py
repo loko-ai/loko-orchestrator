@@ -5,11 +5,13 @@ from collections import defaultdict
 from datetime import timezone
 from pathlib import Path
 from pprint import pprint
+from typing import Union, Any, Optional, Mapping
 
 import aiodocker
 import aiohttp
 import requests
 from aiodocker.containers import DockerContainer
+from aiohttp import ClientTimeout
 from docker.api.build import process_dockerfile
 from docker.utils import tar
 
@@ -28,9 +30,32 @@ def gateway_route(id, host=None, port=8080):
     })
 
 
+from yarl import URL
+
+
+class MyDocker(aiodocker.Docker):
+    def _query(
+            self,
+            path: Union[str, URL],
+            method: str = "GET",
+            *,
+            params: Optional[Mapping[str, Any]] = None,
+            data: Any = None,
+            headers=None,
+            timeout=None,
+            chunked=None,
+            read_until_eof: bool = True,
+            versioned_api: bool = True,
+    ):
+        return super()._query(path, method, params=params, data=data, headers=headers, timeout=100_000, chunked=chunked,
+                              read_until_eof=read_until_eof,
+                              versioned_api=versioned_api)
+
+
 class LokoDockerClient:
     def __init__(self):
-        self.client: aiodocker.Docker = aiodocker.Docker()
+        self.client: aiodocker.Docker = MyDocker()
+        # self.client.session = aiohttp.ClientSession(connector=self.client.connector, timeout=ClientTimeout(total=10))
         self.sub = self.client.events.subscribe()
         self.observers = []
 
@@ -41,6 +66,7 @@ class LokoDockerClient:
         while True:
             try:
                 value = await self.sub.get()
+                print(value)
                 await asyncio.gather(*(o(value) for o in self.observers))
             except Exception as inst:
                 logging.exception(inst)
@@ -110,7 +136,6 @@ class LokoDockerClient:
 
     async def build(self, path, log_collector: LogCollector = None):
         client = self.client
-        # client.session = aiohttp.ClientSession(connector=client.connector, timeout=200 * 1000)
 
         path = Path(path)
         print("Tarring the file")
@@ -127,12 +152,15 @@ class LokoDockerClient:
 
         async for line in client.images.build(fileobj=context,
                                               encoding="gzip",
+                                              rm=True,
                                               tag=f"{path.name}",
                                               buildargs=dict(GATEWAY=GATEWAY), stream=True):
             if "stream" in line:
+                print(line)
                 msg = line['stream'].strip()
 
             if msg:
+                print(msg)
                 last_msg = msg
                 if log_collector:
                     await log_collector(dict(type="log", name=f"{path.name}:builder", msg=msg))
@@ -173,13 +201,13 @@ class LokoDockerClient:
         if volumes and path:
             binds = []
             for el in volumes:
-                local, rm = el.split(":", maxsplit=1)
+                """local, rm = el.split(":", maxsplit=1)
                 local = Path(local)
                 if not local.is_absolute():
                     local = path / local
                 local = str(local.resolve())
-                print(local, rm)
-                binds.append(f"{local}:{rm}")
+                print(local, rm)"""
+                binds.append(el)
             if binds:
                 hc['Binds'] = binds
         if network:

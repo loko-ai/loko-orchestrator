@@ -48,7 +48,7 @@ from loko_orchestrator.utils.conversions_utils import infer_ext, FORMATS2JSON
 # from loko_orchestrator.utils.file_manager_utils import check_for_duplicate, check_protected_folders, \
 #    check_special_characters
 from loko_orchestrator.utils.jsonutils import GenericJsonEncoder
-from loko_orchestrator.utils.logger_utils import logger
+from loguru import logger
 # from loko_orchestrator.utils.projects_utils import check_prj_duplicate, check_prj_id_duplicate
 from loko_orchestrator.utils.sio_utils import emit, Throttle
 
@@ -83,6 +83,8 @@ app.config["REQUEST_TIMEOUT"] = 172800
 if CORS_ON:
     CORS(app, expose_headers=["Range"])
 
+get_components()
+
 
 # @app.exception(Exception)
 # async def generic_exception(request, exception):
@@ -99,11 +101,13 @@ class LicenseManager:
 
     def is_valid(self):
         key = self.get_license()
+        if key is None:
+            return False
         return self.validate(key, KEYGEN_SH_ACCOUNT)
 
     def projects_limit(self):
         if self.valid:
-            return 100
+            return 10000
         else:
             return 5
 
@@ -120,24 +124,28 @@ class LicenseManager:
         return None
 
     def validate(self, key, account_id):
-        data = requests.post(
-            "https://api.keygen.sh/v1/accounts/{}/licenses/actions/validate-key".format(account_id),
-            headers={
-                "Content-Type": "application/vnd.api+json",
-                "Accept": "application/vnd.api+json"
-            },
-            data=json.dumps({
-                "meta": {
-                    "key": key
-                }
-            })
-        ).json()
-        ret = data["meta"].get("valid")
-        print("Valid", ret)
+        try:
+            data = requests.post(
+                "https://api.keygen.sh/v1/accounts/{}/licenses/actions/validate-key".format(account_id),
+                headers={
+                    "Content-Type": "application/vnd.api+json",
+                    "Accept": "application/vnd.api+json"
+                },
+                data=json.dumps({
+                    "meta": {
+                        "key": key
+                    }
+                })
+            ).json()
+            ret = data["meta"].get("valid")
+            print("Valid", ret)
 
-        if ret:
-            return data["meta"].get("valid")
-        return False
+            if ret:
+                return data["meta"].get("valid")
+            return False
+        except Exception as inst:
+            logger.exception(inst)
+            return False
 
 
 LICENSE_MANAGER = LicenseManager(PUBLIC_FOLDER)
@@ -155,7 +163,7 @@ LICENSE_MANAGER = LicenseManager(PUBLIC_FOLDER)
 flows = {}
 flows_info = {}
 
-app.config.update_config(dict(REQUEST_TIMEOUT=100 * 1000, RESPONSE_TIMEOUT=100 * 1000))
+app.config.update_config(dict(REQUEST_TIMEOUT=60 * 1000, RESPONSE_TIMEOUT=60 * 1000))
 
 
 def flows_list():
@@ -558,9 +566,6 @@ async def message(request, project_id):
 
         for el in pdao.get_extensions(pid):
             factory[el['name']] = Custom(**el)
-
-        print(factory)
-
         processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory)
         alias = metadata[id].values.get("alias") or metadata[id].name
     except Exception as inst:
@@ -835,7 +840,7 @@ async def b(app: Sanic, loop):
 
     # loop.create_task(services_scan())
 
-    total_timeout = ClientTimeout(total=ASYNC_SESSION_TIMEOUT)
+    # total_timeout = ClientTimeout(total=ASYNC_SESSION_TIMEOUT)
     # app.aiohttp_session = ClientSession(loop=loop, timeout=total_timeout)
 
 
