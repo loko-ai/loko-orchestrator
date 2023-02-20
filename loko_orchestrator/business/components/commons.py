@@ -377,12 +377,14 @@ class SharedExtension(Component):
         async def f(v, input, service):
             try:
                 url = path.join(gateway, "routes", self.pname, service)
-                print(f"uRRRRRRRl {url}")
-
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",
                                                            data={"file": o, "args": StringIO(json.dumps(kwargs))})
+                elif isinstance(v, sanic.request.File):
+                    resp = await async_request.request(url, "POST",
+                                                       data={"file": v.body,
+                                                             "args": StringIO(json.dumps(kwargs))})
                 else:
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp
