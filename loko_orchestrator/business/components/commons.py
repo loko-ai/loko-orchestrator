@@ -335,6 +335,7 @@ class Custom(Component):
             try:
                 url = path.join(gateway, "routes", project_id, service)
                 logger.debug(url)
+                logger.debug(type(v))
 
                 if isinstance(v, Path):
                     with fsdao.get(v, "rb") as o:
@@ -383,6 +384,11 @@ class SharedExtension(Component):
                     with fsdao.get(v, "rb") as o:
                         resp = await async_request.request(url, "POST",
                                                            data={"file": o, "args": StringIO(json.dumps(kwargs))})
+
+                elif isinstance(v, sanic.request.File):
+                    resp = await async_request.request(url, "POST",
+                                                       data={"file": v.body,
+                                                             "args": StringIO(json.dumps(kwargs))})
                 else:
                     resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
                 return resp

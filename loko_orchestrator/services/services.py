@@ -806,16 +806,6 @@ def term(app, loop):
 async def b(app: Sanic, loop):
     connected = False
 
-    # app.ctx.client = aiodocker.Docker()
-    # mc = app.ctx.message_collector = DockerMessageCollector(client=app.ctx.client, sio=sio, app=app)
-    # app.ctx.docker_manager = DockerManager(app.ctx.client, mc)
-    # app.add_task(mc.event_task())
-    # app.add_task(mc.dequeue())
-    # app.add_task(mc.update_tasks())
-    """async def l(v):
-        name = v.get("name")
-        print(log_collector.get_logs(name)[-1])"""
-
     async def temp(v):
         await sio.emit(v.get("type"), v)
 

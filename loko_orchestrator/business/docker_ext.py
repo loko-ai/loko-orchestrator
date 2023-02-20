@@ -14,6 +14,7 @@ from aiodocker.containers import DockerContainer
 from aiohttp import ClientTimeout
 from docker.api.build import process_dockerfile
 from docker.utils import tar
+from loguru import logger
 
 from loko_orchestrator.business.log_collector import LogCollector
 from loko_orchestrator.config.constants import GATEWAY, DEVELOPMENT
@@ -66,8 +67,9 @@ class LokoDockerClient:
         while True:
             try:
                 value = await self.sub.get()
-                print(value)
-                await asyncio.gather(*(o(value) for o in self.observers))
+                if not value.get("status", "").startswith("exec"):  # filter healtcheck
+                    logger.debug(f"Docker event {value}")
+                    await asyncio.gather(*(o(value) for o in self.observers))
             except Exception as inst:
                 logging.exception(inst)
 

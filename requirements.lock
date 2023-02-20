@@ -15,11 +15,14 @@ gitdb==4.0.9
 GitPython==3.1.27
 httptools==0.4.0
 idna==3.3
+Js2Py==0.74
 loguru==0.6.0
 multidict==6.0.2
+pyjsparser==2.7.1
 PyJWT==2.4.0
 python-engineio==4.3.3
 python-socketio==5.7.1
+pytz-deprecation-shim==0.1.0.post0
 PyYAML==6.0
 requests==2.28.1
 sanic==22.6.0
@@ -27,8 +30,11 @@ Sanic-Cors==2.0.1
 sanic-jwt==1.8.0
 sanic-openapi==21.12.0
 sanic-routing==22.3.0
+six==1.16.0
 smmap==5.0.0
 typing-extensions==4.3.0
+tzdata==2022.7
+tzlocal==4.2
 ujson==5.4.0
 urllib3==1.26.10
 uvloop==0.16.0

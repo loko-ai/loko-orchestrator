@@ -4,10 +4,12 @@ import shutil
 from pathlib import Path
 
 import aiodocker
+from loguru import logger
 
 from loko_orchestrator.business.builder.aio_docker_builder import build_extension_image, run_extension_image
 from loko_orchestrator.business.docker_ext import LokoDockerClient
 from loko_orchestrator.config.constants import EXTERNAL_GATEWAY
+from loko_orchestrator.utils.cache_utils import TTL
 
 
 class SharedExtensionsDAO:
@@ -64,6 +66,8 @@ class SharedExtensionsDAO:
                     gui = side_config.get("gui")
                     print("Side", side, gui)
                     side_name = f"{id}_{side}"
+                    logger.debug(f"{side_name}:{gui}")
+
                     if gui:
                         gw = gui.get("gw", False)
                         path = gui.get("path", "")

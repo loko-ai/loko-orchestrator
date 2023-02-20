@@ -72,7 +72,7 @@ class DockerMessageCollector:
                 ret["Attributes"] = value['Actor']['Attributes']
                 ret['log_id'] = str(uuid.uuid4())
                 self.events.append(ret)
-                print(ret)
+                print("Event", ret)
                 if len(self.events) > self.limit:
                     self.events = self.events[-self.limit:]
             await self.update_tasks()

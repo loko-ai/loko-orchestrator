@@ -12,3 +12,4 @@ sanic-cors
 sanic-jwt
 sanic-openapi
 loguru
+js2py
