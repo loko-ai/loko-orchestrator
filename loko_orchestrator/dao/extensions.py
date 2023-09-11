@@ -39,12 +39,14 @@ class SharedExtensionsDAO:
         ext = self.path / id
         shutil.rmtree(ext)
 
+    def has_icon(self, id):
+        return (self.path / id / "icon.png").exists()
+
     async def get_guis(self, id, client: LokoDockerClient):
         # Main gui
         ret = []
         # Sides guis
         p = self.path / id / "config.json"
-        print(p, p.exists())
         if not await client.is_deployed(id):
             return []
         if p.exists():
@@ -82,7 +84,6 @@ class SharedExtensionsDAO:
                                 exposed = await client.exposed(side_name)
 
                                 ret.append(dict(name=name, url=f"http://localhost:{exposed}/{path}"))
-        print(ret)
         return ret
 
 

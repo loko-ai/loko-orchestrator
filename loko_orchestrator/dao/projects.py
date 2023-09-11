@@ -14,7 +14,7 @@ from loko_orchestrator.business.docker_ext import LokoDockerClient, LogCollector
 from loko_orchestrator.config.constants import GATEWAY, EXTERNAL_GATEWAY
 from loko_orchestrator.utils.dict_utils import ObjectDict
 
-from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template
+from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template, ShortNode, SN
 from loko_orchestrator.utils.jsonutils import GenericJsonEncoder, GenericJsonDecoder
 from loko_orchestrator.utils.logger_utils import logger
 from importlib.resources import path
@@ -54,15 +54,23 @@ class ProjectDAO:
         p.open = o.get("open", [])
         p.active = o.get("active", "main")
         p.graphs = {}
+        version = o.get('version')
 
         m = set()
         for name, g in o.get("graphs", {}).items():
             gr = Graph([], [])
             for n in g.get("nodes", []):
+                print(n)
                 if "__class__" in n:
                     del n["__class__"]
                 try:
-                    node = Node(**n)
+                    if version == "2.0.0":
+                        nid = n['data'].get('id', n.get('id'))
+                        data = n['data'].get('options', {}).get('values', {})
+                        node = SN(id=nid, name=n['data']['name'], position=n['position'], data=data)
+                        node.__class__ = ShortNode
+                    else:
+                        node = Node(**n)
                 except Exception as e:
                     print("eeee", e)
                     raise e
@@ -103,12 +111,14 @@ class InMemoryProjectDAO(ProjectDAO):
 
 
 class FSProjectDAO(ProjectDAO):
-    def __init__(self, path, ext=".studio"):
+    def __init__(self, path, ext=".studio", components=None):
         self.path = Path(path)
         self._enc = GenericJsonEncoder(include_class=True)
-        self._dec = GenericJsonDecoder([Project, Template, Edge, Node, Endpoint, Graph], )
+        self._dec = GenericJsonDecoder(
+            [Project, Template, Edge, Node, Endpoint, Graph, ShortNode(self, components or [])], )
         self.ext = ext
         self.deployed = {}
+        self.components = components
 
     async def all(self, client: LokoDockerClient, info=None) -> List[str]:
         ret = []
@@ -225,7 +235,7 @@ class FSProjectDAO(ProjectDAO):
         custom = []
 
         conf = self.path / id / "extensions" / "components.json"
-        print("Project", conf, conf.exists())
+        # print("Project", conf, conf.exists())
         groups = defaultdict(list)
         try:
             if conf.exists():

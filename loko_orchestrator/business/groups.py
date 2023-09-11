@@ -9,7 +9,7 @@ import requests
 
 from loko_orchestrator.business.components.collections import GrouperComponent, HeadComponent, SamplerComponent
 from loko_orchestrator.business.components.commons import Debug, Function, Trigger, Array, Selector, MergeComponent, \
-    SwitchComponent, Template, FilterComponent, Value, Renamer, Custom, SharedExtension
+    SwitchComponent, Template, FilterComponent, Value, Renamer, Custom, SharedExtension, EventComponent, Globals
 from loko_orchestrator.business.components.ds4biz import Predictor
 from loko_orchestrator.business.components.http import HTTPReq, HTTPResponse, HTTPRoute
 from loko_orchestrator.business.components.io import CSVReaderComponent, DirectoryComponent, FileContent, FileReader, \
@@ -18,8 +18,7 @@ from loko_orchestrator.business.components.time import DelayComponent
 
 # from loko_orchestrator.config import app_config
 # from loko_orchestrator.config.app_config import pdao
-from loko_orchestrator.config import app_config
-from loko_orchestrator.config.app_config import PUBLIC_FOLDER
+from loko_orchestrator.config.constants import PUBLIC_FOLDER, GATEWAY
 
 COMPONENTS = []
 
@@ -27,7 +26,7 @@ COMPONENTS.append(dict(group="Common",
                        components=[Array(), Debug(), FilterComponent(), Function(),
                                    GrouperComponent(), HeadComponent(), MergeComponent(), Renamer(), SamplerComponent(),
                                    Selector(),
-                                   SwitchComponent(), Trigger()]))  # , FileConverter()]))
+                                   SwitchComponent(), Trigger(), EventComponent(), Globals()]))  # , FileConverter()]))
 
 COMPONENTS.append(dict(group="HTTP", components=[HTTPReq(), HTTPResponse(), HTTPRoute(), Template()]))
 COMPONENTS.append(
@@ -68,7 +67,7 @@ def get_components():
             _rtype = getattr(el, "microservice", None)
             el.disabled = False
             if _rtype:
-                _type = urljoin(app_config.GATEWAY, join("services", _rtype))
+                _type = urljoin(GATEWAY, join("services", _rtype))
                 avail = requests.get(_type).json()
                 if not avail:
                     el.disabled = True

@@ -9,6 +9,7 @@ import aiohttp
 import requests
 from docker.api.build import process_dockerfile
 from docker.utils import tar
+from loguru import logger
 
 from loko_orchestrator.business.builder.aio_docker_builder import prepare_docker_ignore
 from loko_orchestrator.utils.dict_utils import search_key
@@ -79,7 +80,7 @@ class DockerMessageCollector:
             await self.notifier("events")
 
     async def enqueue(self, name, event):
-        print("Enqueuing", name, event)
+        logger.debug(f"Enqueuing {name} {event}")
         await self.queue.put((name, "DEBUG", event))
 
     async def emit_now(self, id, msg):

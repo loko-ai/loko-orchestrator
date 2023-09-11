@@ -17,8 +17,6 @@ def build_extension_image(path):
                              buildargs=dict(GATEWAY="http://localhost:8080")):
         if "stream" in line:
             msg = line['stream'].strip()
-            if msg:
-                print(msg)
 
 
 def run_extension_image(id, gw):

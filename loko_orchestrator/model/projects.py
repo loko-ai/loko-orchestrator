@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime
 
 LATEST_PRJ_VERSION = "1.0.0"
@@ -38,6 +39,43 @@ class Node:
         # self.values = values or {}
         # for k, v in kwargs.items():
         #     setattr(self, k, v)
+
+
+class SN:
+    def __init__(self, id, name, position, data):
+        self.id = id
+        self.position = position
+        self.data = data
+        self.type = "custom"
+        self.name = name
+
+    def to_dict(self):
+        print(self.data)
+        return dict(type="custom", id=self.id, name=self.name, position=self.position, data=self.data, width=150,
+                    height=200)
+
+
+class ShortNode:
+    def __init__(self, dao, components):
+        self.__name__ = "ShortNode"
+        self.dao = dao
+        self.components = {}
+        for g in components:
+            for c in g['components']:
+                self.components[c.name] = c
+
+    def __call__(self, **kwargs):
+        print("Coverting to shortnode", kwargs)
+        name = kwargs['name']
+        c = self.components[name]
+        cc = copy.deepcopy(c)
+        cc.id = kwargs['id']
+        cc.options['values'] = kwargs['data']
+        # cc.data = {}
+        # cc.data['options'] = cc.options
+        # del cc.options
+        print(cc.__dict__)
+        return SN(cc.id, name=name, position=kwargs['position'], data=cc.__dict__)
 
 
 class Endpoint:
@@ -102,7 +140,7 @@ class Project:
         self.graphs = graphs or dict(main=Graph(nodes=[], edges=[]))
         self.open = open or ["main"]
         self.active = active or "main"
-        self.version = LATEST_PRJ_VERSION
+        self.version = kwargs.get("version") or LATEST_PRJ_VERSION
 
     def nodes(self):
         for id, g in self.graphs.items():
@@ -113,6 +151,20 @@ class Project:
         for id, g in self.graphs.items():
             for e in g.edges:
                 yield e
+
+    def get_needed_exts(self):
+        exts = set()
+        for n, t in self.nodes():
+            ext = n.data.get('pname')
+            if ext:
+                exts.add(ext)
+        return exts
+
+    def get_nodes_by_type(self, _type: str):
+        for n, t in self.nodes():
+            t = n.data.get('name')
+            if t == _type:
+                yield n
 
     def info(self):
 

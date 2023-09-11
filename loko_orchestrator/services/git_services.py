@@ -19,7 +19,6 @@ def add_git_services(app, bp, sio):
     @bp.post("/git/clone")
     @doc.consumes(doc.JsonBody(), location="body")
     async def clone(request):
-        print(request.json)
         url = request.json['url']
         shared = request.json.get("shared", False)
         if shared:

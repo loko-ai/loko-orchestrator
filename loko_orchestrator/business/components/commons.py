@@ -2,10 +2,12 @@ import json
 import os
 import sys
 import traceback
+from collections import defaultdict
 from functools import partial
 from io import StringIO
 from pathlib import Path
 import sanic.request
+from aiohttp import FormData
 from dict_path import DictPath
 from loguru import logger
 from sanic.exceptions import SanicException
@@ -13,7 +15,9 @@ from sanic.exceptions import SanicException
 from loko_orchestrator.business.engine import Fun, Notifier, Parameters, repository, ArrayStream, Merger, Filter, \
     Repository, Switch, AsyncFun, MultiFun, ProcessorError
 # from loko_orchestrator.config.app_config import fsdao, sio
-from loko_orchestrator.config.app_config import fsdao
+from loko_orchestrator.config.constants import global_daos
+from loko_orchestrator.config.constants import PUBLIC_FOLDER
+from loko_orchestrator.dao.fs import LayeredFS, FSDao
 from loko_orchestrator.model.components import Component, Field, Options, required, Text
 from loko_orchestrator.utils import async_request
 from loko_orchestrator.utils.codeutils import compile_fun
@@ -34,7 +38,7 @@ class Debug(Component):
 
     def create(self, name, **kwargs):
         p = Fun(lambda x: x, **kwargs)
-        sender = kwargs.get("alias") or name
+        # sender = kwargs.get("alias") or name
         # p.pipe(Notifier(sender, sio, "messages"))
         # p.pipe(Fun(lambda x: print("EEEEE", x)))
         return p
@@ -55,10 +59,10 @@ Variables available are:
                          values=dict(code="return data", propagate=True, notify_warnings=True), icon="RiCodeSSlashFill",
                          configured=True)
 
-    def create(self, code, name, propagate=True, notify_warnings=True, **kwargs):
+    def create(self, code, name, project_id, propagate=True, notify_warnings=True, **kwargs):
         name = kwargs.get("alias") or name
         kwargs["name"] = name
-        g = dict(Parameters=Parameters, repository=Repository(repository))
+        g = dict(Parameters=Parameters, repository=Repository(repository), globals=global_daos[project_id])
         # g.update(app_config.EXTERNAL_MODULES)
         return Fun(compile_fun(code, g), propagate=propagate, notify_warnings=notify_warnings, **kwargs)
 
@@ -316,6 +320,40 @@ class Template(Component):
 """
 
 
+class EventComponent(Component):
+    def __init__(self):
+        args = [Options(name="event", options=["start", "stop"], value="start")]
+        super().__init__("Event", group="Common", description="template_doc", icon="RiHtml5Fill", args=args)
+
+    def create(self, gateway, project_id, session, **kwargs):
+        return Fun(lambda x: x)
+
+
+class Globals(Component):
+    def __init__(self):
+        args = [dict(name="inputs", label="Inputs", type="multiKeyValue", validation=required, fields=[
+            dict(name="label", placeholder="Input", validation=required)
+        ]), dict(name="persist", type="boolean", label="Persist value")]
+        super().__init__("Globals", group="Common", description="template_doc", icon="RiGlobalLine", args=args,
+                         inputs=[])
+
+    def create(self, project_id, inputs, persist, **kwargs):
+        mapping = {}
+        repo = Repository(repository)
+        for inp in inputs:
+            async def f(value, key=inp['label']):
+                if persist:
+                    setattr(global_daos[project_id], key, value)
+                else:
+                    repo.set(key, value)
+
+                return value
+
+            mapping[inp['id']] = f, "output"
+
+        return MultiFun(mapping, **kwargs)
+
+
 class Custom(Component):
     def __init__(self, **kwargs):
         args = []
@@ -327,29 +365,43 @@ class Custom(Component):
             del kwargs['options']
 
         logger.debug(("Custom", args, kwargs))
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        self.fsdao = LayeredFS()
+        self.fsdao.mount("data", fs_dao)
 
         super().__init__(args=args, values=values, **kwargs)
 
-    def create(self, gateway, project_id, **kwargs):
-        async def f(v, input, service):
+    def create(self, gateway, project_id, session, **kwargs):
+        async def f(v, input, service, **other_args):
+            if other_args:
+                other_args = kwargs | other_args
+            else:
+                other_args = kwargs
+            headers = {"accept": "application/jsonl,application.json,*/*"}
             try:
                 url = path.join(gateway, "routes", project_id, service)
-                logger.debug(url)
+                logger.debug(f"URL is {url}")
                 logger.debug(type(v))
 
                 if isinstance(v, Path):
-                    with fsdao.get(v, "rb") as o:
-                        resp = await async_request.request(url, "POST",
+                    with self.fsdao.get(v, "rb") as o:
+                        resp = await async_request.request(url, session, "POST",
                                                            data={"file": o,
-                                                                 "args": StringIO(json.dumps(kwargs))})
+                                                                 "args": StringIO(json.dumps(other_args))},
+                                                           headers=headers)
                 elif isinstance(v, sanic.request.File):
-                    resp = await async_request.request(url, "POST",
-                                                       data={"file": v.body,
-                                                             "args": StringIO(json.dumps(kwargs))})
+                    fd = FormData()
+                    fd.add_field("file", v.body, filename=v.name, content_type=v.type)
+                    fd.add_field("args", StringIO(json.dumps(other_args)))
+
+                    resp = await async_request.request(url, session, "POST",
+                                                       data=fd, headers=headers)
                 else:
-                    resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
+                    resp = await async_request.request(url, session, "POST", json=dict(value=v, args=other_args),
+                                                       headers=headers)
                 return resp
             except Exception as inst:
+                logger.exception(inst)
                 raise Exception(f"Problems with extension '{project_id}' - {inst}")
 
         mapping = {}
@@ -371,26 +423,33 @@ class SharedExtension(Component):
             del kwargs['options']
 
         logger.debug(("Custom", args, kwargs))
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        self.fsdao = LayeredFS()
+        self.fsdao.mount("data", fs_dao)
 
         super().__init__(args=args, values=values, **kwargs)
 
-    def create(self, gateway, project_id, **kwargs):
-        async def f(v, input, service):
+    def create(self, gateway, project_id, session, **kwargs):
+        async def f(v, input, service, **other_args):
+            if other_args:
+                other_args = kwargs | other_args
+            else:
+                other_args = kwargs
+
             try:
                 url = path.join(gateway, "routes", self.pname, service)
-                print(f"uRRRRRRRl {url}")
-
                 if isinstance(v, Path):
-                    with fsdao.get(v, "rb") as o:
-                        resp = await async_request.request(url, "POST",
-                                                           data={"file": o, "args": StringIO(json.dumps(kwargs))})
-
+                    with self.fsdao.get(v, "rb") as o:
+                        resp = await async_request.request(url, session, "POST",
+                                                           data={"file": o, "args": StringIO(json.dumps(other_args))})
                 elif isinstance(v, sanic.request.File):
-                    resp = await async_request.request(url, "POST",
-                                                       data={"file": v.body,
-                                                             "args": StringIO(json.dumps(kwargs))})
+                    fd = FormData()
+                    fd.add_field("file", v.body, filename=v.name, content_type=v.type)
+                    fd.add_field("args", StringIO(json.dumps(other_args)))
+                    resp = await async_request.request(url, session, "POST",
+                                                       data=fd)
                 else:
-                    resp = await async_request.request(url, "POST", json=dict(value=v, args=kwargs))
+                    resp = await async_request.request(url, session, "POST", json=dict(value=v, args=other_args))
                 return resp
             except Exception as inst:
                 # logger.exception(inst)
@@ -401,7 +460,3 @@ class SharedExtension(Component):
             mapping[el['id']] = partial(f, input=el['id'], service=el.get("service", "")), el.get("to", "output")
 
         return MultiFun(mapping, **kwargs)
-
-
-if __name__ == "__main__":
-    print("Ciao")

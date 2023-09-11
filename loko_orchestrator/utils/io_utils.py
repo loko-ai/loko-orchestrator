@@ -1,15 +1,16 @@
+import json
 from pathlib import Path
 
-from loko_orchestrator.config.app_config import fsdao
-from loko_orchestrator.utils.logger_utils import logger
 
-
-def content_reader(path, binary=False):
-    if binary:
-        logger.debug("reading binary file: %s" % path)
-        with fsdao.get(Path(path), "rb") as f:
-            return f.read()
-    else:
-        logger.debug("reading file:  %s" % path)
-        with fsdao.get(Path(path), "r") as f:
-            return f.read()
+def content_reader(path, fsdao, output_type="text"):
+    match output_type:
+        case "text":
+            with fsdao.get(Path(path), "r") as f:
+                return f.read()
+        case "binary":
+            with fsdao.get(Path(path), "rb") as f:
+                return f.read()
+        case "json":
+            with fsdao.get(Path(path)) as f:
+                return json.load(f)
+    raise Exception(f"Can't read file: output_type {output_type}")

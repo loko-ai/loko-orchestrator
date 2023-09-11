@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from collections import defaultdict
 from datetime import timezone
 from pathlib import Path
@@ -17,8 +18,9 @@ from docker.utils import tar
 from loguru import logger
 
 from loko_orchestrator.business.log_collector import LogCollector
-from loko_orchestrator.config.constants import GATEWAY, DEVELOPMENT
+from loko_orchestrator.config.constants import GATEWAY, DEVELOPMENT, config_dao
 from loko_orchestrator.utils.dict_utils import search_key
+from loko_orchestrator.utils.user_utils import get_docker_group
 
 
 def gateway_route(id, host=None, port=8080):
@@ -131,7 +133,7 @@ class LokoDockerClient:
     async def pull(self, id, final_name=None, log_collector: LogCollector = None):
         if ":" not in id:
             id = f"{id}:latest"
-        print("Pulling", id)
+        logger.debug(("Pulling", id))
         async for line in self.client.images.pull(from_image=id, stream=True):
             if log_collector and final_name:
                 await log_collector(dict(type="log", name=final_name, msg=json.dumps(line)))
@@ -140,9 +142,9 @@ class LokoDockerClient:
         client = self.client
 
         path = Path(path)
-        print("Tarring the file")
+        logger.debug("Tarring the file")
         exclude = self.prepare_docker_ignore(path)
-        print("Excludes", exclude)
+        logger.debug(("Excludes", exclude))
         context = tar(
             path, exclude=exclude, dockerfile=process_dockerfile("Dockerfile", path), gzip=True
         )
@@ -158,11 +160,9 @@ class LokoDockerClient:
                                               tag=f"{path.name}",
                                               buildargs=dict(GATEWAY=GATEWAY), stream=True):
             if "stream" in line:
-                print(line)
                 msg = line['stream'].strip()
 
             if msg:
-                print(msg)
                 last_msg = msg
                 if log_collector:
                     await log_collector(dict(type="log", name=f"{path.name}:builder", msg=msg))
@@ -203,12 +203,6 @@ class LokoDockerClient:
         if volumes and path:
             binds = []
             for el in volumes:
-                """local, rm = el.split(":", maxsplit=1)
-                local = Path(local)
-                if not local.is_absolute():
-                    local = path / local
-                local = str(local.resolve())
-                print(local, rm)"""
                 binds.append(el)
             if binds:
                 hc['Binds'] = binds
@@ -224,6 +218,8 @@ class LokoDockerClient:
             for k, v in environment.items():
                 temp.append(f"{k}={v}")
             config["Env"] = temp
+
+        logger.debug(f"ENV {config} {environment}")
 
         cont = await self.client.containers.run(name=name, config=config)
 
@@ -279,7 +275,7 @@ class LokoDockerClient:
 
 
 async def log(v):
-    print(v)
+    print("LOOOOOG", v)
 
 
 async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
@@ -293,12 +289,14 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
         success = await client.build(p, lc)
 
         # Running main project
-        config_path = p / "config.json"
-        config = {}
+        # config_path = p / "config.json"
+        # config = {}
 
-        if config_path.exists():
-            with config_path.open() as inp:
-                config = json.load(inp)
+        config = config_dao.get_config(p)
+
+        # if config_path.exists():
+        #    with config_path.open() as inp:
+        #        config = json.load(inp)
 
         if success:
             lc.remove_log(f"{p.name}:builder")
@@ -311,12 +309,16 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
                 raise Exception("Too many ports exposed")
             port = exposed[0]
             main = config.get("main", {})
+            if "environment" not in main:
+                main['environment'] = {}
+            main['environment']['USER_UID'] = os.getuid()
+            main['environment']['USER_GID'] = get_docker_group()
 
             if DEVELOPMENT:
                 cont = await client.run(p.name, p.name, network="loko", ports={port: None},
                                         labels=dict(type="loko_project", parent=p.name), path=p, **main)
                 exposed_cont = await client.exposed(p.name)
-                print(exposed_cont)
+                logger.debug(exposed_cont)
                 if exposed_cont:
                     gateway_route(p.name, "localhost", exposed_cont)
             else:
@@ -329,17 +331,16 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
             # Running side containers
             if config:
                 for side_name, side_config in config.get("side_containers", {}).items():
-                    print(side_name, side_config)
+                    logger.debug((side_name, side_config))
                     final_name = f"{p.name}_{side_name}"
                     lc.add_log(final_name)
 
-                    print(final_name)
+                    logger.debug(final_name)
                     image = side_config.get('image')
                     if ":" not in image:
                         image = f"{image}:latest"
                     if image:
                         if not await client.image_exists(image):
-                            print("Doesn't exist" * 20, image)
                             await client.pull(image, final_name, lc)
                     else:
                         raise Exception(f"Specify an image for '{side_name}'")
@@ -347,7 +348,7 @@ async def deploy(p: Path, client: LokoDockerClient, lc: LogCollector):
                                             labels=dict(type="loko_side_container", parent=p.name), path=p)
                     if side_config.get("gw"):
                         exposed_cont = await client.exposed(final_name) or 8080
-                        print(final_name, "Routing to gw")
+                        logger.debug((final_name, "Routing to gw"))
                         gateway_route(final_name, exposed_cont)
                     asyncio.create_task(
                         client.add_log_task(final_name, cont, stdout=False, stderr=True, observers=[lc]))
@@ -373,27 +374,12 @@ async def undeploy(p: Path, client: LokoDockerClient, lc: LogCollector):
     config_path = p / "config.json"
     while await client.exists(name):
         await asyncio.sleep(.1)
-    if config_path.exists():
-        with config_path.open() as inp:
-            config = json.load(inp)
-            for side_name, side_config in config.get("side_containers", {}).items():
-                final_name = f"{p.name}_{side_name}"
-                side = await client.get(final_name)
-                if side:
-                    lc.remove_log(final_name)
-                    lc.statuses[final_name] = None
+    config = config_dao.get_config(p)
+    for side_name, side_config in config.get("side_containers", {}).items():
+        final_name = f"{p.name}_{side_name}"
+        side = await client.get(final_name)
+        if side:
+            lc.remove_log(final_name)
+            lc.statuses[final_name] = None
 
-                    await side.kill()
-
-
-async def main():
-    client = LokoDockerClient()
-    print(cont)
-    async for ev in cont.log(stdout=True, stderr=True, follow=True):
-        print(ev)
-
-    await client.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            await side.kill()

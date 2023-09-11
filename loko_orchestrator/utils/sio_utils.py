@@ -19,7 +19,7 @@ class Throttle:
     async def __call__(self, *args, **kwargs):
         _hash = json.dumps((args, kwargs))
         task = self.tasks.get(_hash)
-        print(_hash, args, kwargs)
+        # print(_hash, args, kwargs)
         if task:
             return
 

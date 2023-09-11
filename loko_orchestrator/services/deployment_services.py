@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from pathlib import Path
 from pprint import pprint
 
 import aiohttp
@@ -10,16 +11,21 @@ from sanic_openapi.openapi2 import doc
 
 from loko_orchestrator.business.builder.aio_docker_builder import build_extension_image, run_extension_image, run_sides
 from loko_orchestrator.business.builder.dockermanager import DockerManager
+from loko_orchestrator.business.components.commons import Custom
+from loko_orchestrator.business.converters import project2processor, get_project_info
 from loko_orchestrator.business.docker_ext import LokoDockerClient, deploy, undeploy
+from loko_orchestrator.business.groups import FACTORY
 from loko_orchestrator.business.log_collector import LogCollector
 from loko_orchestrator.config.app_config import shared_extensions_dao, pdao
 import time
 
-from loko_orchestrator.config.constants import GATEWAY
+from loko_orchestrator.config.constants import GATEWAY, EXTERNAL_GATEWAY, global_daos
+from loko_orchestrator.dao.globals import GlobalDAO
 from loko_orchestrator.utils.cache_utils import TTL
 from loko_orchestrator.utils.jsonutils import GenericJsonEncoder
 from loko_orchestrator.utils.sio_utils import emit
 import json
+import git
 
 
 def myjson(o, headers=None):
@@ -31,6 +37,18 @@ def myjson(o, headers=None):
 github_url = "https://api.github.com/orgs/loko-ai/repos"
 default_image = 'https://raw.githubusercontent.com/loko-ai/prova_gui/master/icon.png'
 avatar_url = "https://avatars.githubusercontent.com/u/109956019?v=4"
+
+
+def get_remote(p: Path, name="origin"):
+    repo = git.Repo(p)
+    for r in repo.remotes:
+        if r.name == name:
+            temp = list(r.urls)
+            if len(temp) == 1:
+                return temp[0]
+            else:
+                raise Exception("Too many urls")
+    raise Exception(f"{name} not found")
 
 
 @TTL(t=60 * 10)
@@ -55,7 +73,6 @@ async def get_installed():
 
 
 def check_github_project(p):
-    print(p)
     return not p['private'] and "extension" in p.get("topics")
 
 
@@ -67,9 +84,21 @@ def add_deployment_services(app, bp, sio):
         log_collector: LogCollector = app.ctx.log_collector
         for el in await get_installed():
             guis = await shared_extensions_dao.get_guis(el, client)
-            ret.append(dict(name=el, id=el, topics=[], html_url="", image=default_image,
+            image = default_image
+            if shared_extensions_dao.has_icon(el):
+                image = f"{EXTERNAL_GATEWAY}/routes/orchestrator/files/data/shared/extensions/{el}/icon.png"
+            html_url = ""
+            try:
+                html_url = get_remote(shared_extensions_dao.path / el)
+                logger.debug(f"HTML: {html_url}")
+            except Exception as inst:
+                logger.error(inst)
+
+            ret.append(dict(name=el, id=el, topics=[], html_url=html_url,
+                            image=image,
                             owner=dict(login="loko-ai", avatar_url=avatar_url),
-                            status=await client.is_deployed(el), guis=guis))
+                            status=await client.is_deployed(el), guis=guis),
+                       )
             ret = sorted(ret, key=lambda x: x['name'])
         return myjson(ret)
 
@@ -109,13 +138,20 @@ def add_deployment_services(app, bp, sio):
     @bp.get("/deploy/<id>")
     @doc.consumes(doc.String(name="id"), location="path", required=True)
     async def build(request, id):
+        global_daos[id] = GlobalDAO()
         client: LokoDockerClient = app.ctx.client
         log_collector: LogCollector = app.ctx.log_collector
+        p = pdao.get(id)
+        exts = p.get_needed_exts()
+        for ext in exts:
+            if not await shared_extensions_dao.status(ext):
+                await deploy(shared_extensions_dao.path / ext, client, log_collector)
+                await shared_extensions_dao.deploy(ext)
+        guis = None
         if pdao.has_extensions(id):
             await deploy(pdao.path / id, client, log_collector)
             guis = await pdao.get_guis(id, client)
             pdao.deploy(id)
-            return myjson(dict(status=True, guis=guis))
         else:
             log_collector.add_log(id)
             log_collector.logs[id] = [
@@ -123,6 +159,20 @@ def add_deployment_services(app, bp, sio):
                      log_id=str(uuid.uuid4()))]
             pdao.deploy(id)
             await sio.emit("events", {})
+        pid, nodes, edges, graphs = get_project_info(p)
+        factory = dict(FACTORY)
+
+        for el in pdao.get_extensions(pid):
+            factory[el['name']] = Custom(**el)
+        for ev in p.get_nodes_by_type("Event"):
+            if ev.data['options']['values']['event'] == "start":
+                processors, metadata = project2processor(ev.id, pid, nodes, edges, tab=graphs[ev.id], headers={},
+                                                         factory=factory,
+                                                         session=app.ctx.aiohttp_session)
+                await processors[ev.id].consume("start", flush=True)
+        if guis:
+            return myjson(dict(status=True, guis=guis))
+        else:
             return myjson(dict(status=True))
 
     @bp.get("/undeploy/<id>")
@@ -177,7 +227,7 @@ def add_deployment_services(app, bp, sio):
         async with aiohttp.ClientSession() as session:
             # async with session.get(github_url, params=dict(per_page=100)) as resp:
             data = await retrieve_extensions()
-            logger.debug(data)
+            # logger.debug(data)
             data = [x for x in data if check_github_project(x) and not x['name'] in already]
             data = sorted(data, key=lambda x: x['name'])
             await asyncio.gather(*[set_image(x, session) for x in data])

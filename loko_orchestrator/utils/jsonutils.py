@@ -8,6 +8,9 @@ class GenericJsonEncoder(JSONEncoder):
         self.include_class = include_class
 
     def default(self, o):
+        if hasattr(o, "to_dict"):
+            return o.to_dict()
+
         if hasattr(o, "__dict__"):
             temp = dict(o.__dict__)
             if self.include_class:

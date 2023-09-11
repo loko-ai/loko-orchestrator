@@ -14,7 +14,7 @@ from uuid import uuid4
 import aiodocker
 import requests
 import sanic
-from aiohttp import ClientTimeout
+from aiohttp import ClientTimeout, ClientSession
 from sanic import Blueprint
 from sanic import Sanic
 from sanic.exceptions import NotFound, SanicException, Unauthorized
@@ -36,7 +36,9 @@ from loko_orchestrator.business.engine import repository
 from loko_orchestrator.business.groups import get_components, FACTORY
 from loko_orchestrator.business.log_collector import LogCollector
 from loko_orchestrator.config.app_config import pdao, sio, tdao, fsdao, shared_extensions_dao
-from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER
+from loko_orchestrator.config.constants import CORS_ON, GATEWAY, ASYNC_SESSION_TIMEOUT, PORT, DEBUG, PUBLIC_FOLDER, \
+    streams
+from loko_orchestrator.dao.globals import GlobalDAO
 from loko_orchestrator.model.projects import Project
 from loko_orchestrator.services.deployment_services import add_deployment_services
 from loko_orchestrator.services.git_services import add_git_services
@@ -79,6 +81,7 @@ app.config["API_SECURITY_DEFINITIONS"] = {
 
 app.config["REQUEST_MAX_SIZE"] = 20000000000
 app.config["REQUEST_TIMEOUT"] = 172800
+app.config["RESPONSE_TIMEOUT"] = 172800
 
 if CORS_ON:
     CORS(app, expose_headers=["Range"])
@@ -210,7 +213,10 @@ async def cancel(request):
         t = flows[id]
         del flows[id]
         del flows_info[id]
-        t.cancel()
+        # t.cancel()
+    for s in streams:
+        logger.debug(s)
+        s.stopped = True
     await emit(sio, "flows", flows_list())
     return sjson({"msg": "Ok"})
 
@@ -237,8 +243,13 @@ async def cancel(request, id):
         t = flows[id]
         del flows[id]
         del flows_info[id]
-        t.cancel()
-        await emit(sio, "flows", flows_list())
+        # t.cancel()
+    for s in streams:
+        logger.debug(s)
+        s.stopped = True
+    streams.clear()
+    # t.cancel()
+    await emit(sio, "flows", flows_list())
 
     return sjson({"msg": "Ok"})
 
@@ -271,7 +282,8 @@ async def endpoints(request, project_id, path):
         for el in pdao.get_extensions(project_id):
             factory[el['name']] = Custom(**el)
         pid, nodes, edges, graphs = get_project_info(project)
-        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory)
+        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory,
+                                                 session=app.ctx.aiohttp_session)
 
     except Exception as inst:
         logging.exception(inst)
@@ -566,7 +578,8 @@ async def message(request, project_id):
 
         for el in pdao.get_extensions(pid):
             factory[el['name']] = Custom(**el)
-        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory)
+        processors, metadata = project2processor(id, pid, nodes, edges, tab=graphs[id], headers=bth, factory=factory,
+                                                 session=app.ctx.aiohttp_session)
         alias = metadata[id].values.get("alias") or metadata[id].name
     except Exception as inst:
         logging.exception(inst)
@@ -830,8 +843,8 @@ async def b(app: Sanic, loop):
 
     # loop.create_task(services_scan())
 
-    # total_timeout = ClientTimeout(total=ASYNC_SESSION_TIMEOUT)
-    # app.aiohttp_session = ClientSession(loop=loop, timeout=total_timeout)
+    total_timeout = ClientTimeout(total=ASYNC_SESSION_TIMEOUT)
+    app.ctx.aiohttp_session = ClientSession(loop=loop, timeout=total_timeout)
 
 
 """@app.exception(Exception)
@@ -856,6 +869,7 @@ async def disconnect():
 # @app.exception(Exception)
 async def generic_exception(request, exception):
     try:
+        logger.exception(exception)
         e = str(exception)
         j = dict(error=e)
         if not isinstance(exception, sanic.exceptions.NotFound):
@@ -876,7 +890,6 @@ add_logging_services(app, bp)
 add_deployment_services(app, bp, sio)
 add_git_services(app, bp, sio)
 app.blueprint(bp)
-
 app.error_handler.add(Exception, generic_exception)
 
 if __name__ == "__main__":

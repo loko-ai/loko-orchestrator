@@ -239,9 +239,7 @@ class LayeredFS(FSLikeDAO):
 
     def save(self, path, stream, mode="wb", **kwargs):
         path = Path(path)
-        print("paaath", path)
         dao, prefix, rest_path = self.daos.find_prefix(path.parts)
-        print(rest_path)
         dao.save(Path(*rest_path), stream, mode=mode, **kwargs)
 
     def mkdir(self, path, **kwargs):

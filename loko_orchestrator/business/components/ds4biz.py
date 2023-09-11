@@ -5,15 +5,13 @@ import re
 from os import path
 
 from loko_orchestrator.business.engine import MultiFun, AsyncFun, TSCollector, ChainProcessor
-from loko_orchestrator.config.app_config import fsdao, PUBLIC_FOLDER
+
 from loko_orchestrator.model.components import Component, Text
 from loko_orchestrator.resources.doc_ds4biz_component import faker_doc, matcher_doc, textractor_doc, nlp_doc, \
     storage_doc, predictor_doc, \
     vision_doc, entity_extractor_doc
 from loko_orchestrator.utils import async_request
 from loko_orchestrator.utils.async_request import AsyncRequest
-from loko_orchestrator.utils.io_utils import content_reader
-from loko_orchestrator.utils.logger_utils import logger
 
 timeout_vision_fit = 60 * 10
 
@@ -87,7 +85,7 @@ class NLP(Component):
         #                      chunk=(chunk, "chunk")))
 
 
-class Textract(Component):
+"""class Textract(Component):
     def __init__(self):
         self.microservice = "ds4biz-textract"
         args = [dict(name="service", type="service", label="Available services", fragment="ds4biz-textract",
@@ -317,6 +315,7 @@ class Textract(Component):
                headers=None, **kwargs):
         # async def ocr_extraction():
         headers = headers or dict()
+        
 
         async def ocr_extraction(v, event=None, gateway=gateway, service=service, accept=accept,  # pool=pool,
                                  force_ocr=force_ocr, analyzer=analyzer, pre_processing=pre_processing,
@@ -759,6 +758,7 @@ class Vision(Component):
                              create=(create, 'create'),
                              info=(info, "info"),
                              delete=(delete, "delete")), **kwargs)
+"""
 
 
 class Predictor(Component):
@@ -869,7 +869,7 @@ class Predictor(Component):
                                      limit='0', eval_branch='development'
                                      ))
 
-    def create(self, gateway, service, predictor, propagate=True, stream=False, target_y='',
+    def create(self, gateway, service, predictor, session, propagate=True, stream=False, target_y='',
                # fit params
                partial_fit=False, fit_params='{}', cv='0', report=True, history_limit='0', test_size=.2,
                save_dataset='no',
@@ -884,7 +884,7 @@ class Predictor(Component):
 
         async def init(value, gateway=gateway, service=service, predictor=predictor):
             url = path.join(gateway, service, "predictors", predictor)
-            ret = await async_request.request(url, "POST", headers=headers)
+            ret = await async_request.request(url, session, "POST", headers=headers)
             return ret
 
         async def evaluate(value, gateway=gateway, service=service, predictor=predictor,
@@ -893,7 +893,7 @@ class Predictor(Component):
             url = path.join(gateway, service, "predictors", predictor)
             purl = path.join(url, "evaluate")
 
-            ret = await async_request.request(purl, "POST", json=value,
+            ret = await async_request.request(purl, session, "POST", json=value,
                                               params=dict(limit=str(limit),
                                                           branch=eval_branch,
                                                           task=task), headers=headers)
@@ -911,7 +911,7 @@ class Predictor(Component):
             if not isinstance(value, (list, tuple)):
                 value = [value]
 
-            ret = await async_request.request(purl, "POST", json=value,
+            ret = await async_request.request(purl, session, "POST", json=value,
                                               params=dict(include_probs=str(include_probs).lower(),
                                                           branch=predict_branch), headers=headers)
             ## se non e' una lista, e' un errore
@@ -938,7 +938,7 @@ class Predictor(Component):
                     temp['target'].append(target)
                 value = temp
             save_dataset = 'true' if save_dataset == 'yes' else 'false'
-            ret = await async_request.request(purl, "POST", json=value,
+            ret = await async_request.request(purl, session, "POST", json=value,
                                               params=dict(partial=str(partial_fit).lower(),
                                                           cv=str(cv),
                                                           report=str(report).lower(),

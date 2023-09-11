@@ -4,8 +4,10 @@ from os import path
 from pathlib import Path
 
 from loko_orchestrator.business.engine import Fun, FileWriter, Directory, CSVReader, CSVWriter, LineReader
-from loko_orchestrator.config.app_config import fsdao
-from loko_orchestrator.model.components import Component
+# from loko_orchestrator.config.app_config import fsdao
+from loko_orchestrator.config.constants import PUBLIC_FOLDER
+from loko_orchestrator.dao.fs import FSDao, LayeredFS
+from loko_orchestrator.model.components import Component, Options
 from loko_orchestrator.resources.doc_io_component import file_reader_doc, directory_reader_doc, file_content_doc, \
     line_reader_doc, file_writer_doc, csv_reader_doc, csv_writer_doc
 from loko_orchestrator.utils.io_utils import content_reader
@@ -24,9 +26,12 @@ class FileReader(Component):
                          click="Send file")
 
     def create(self, value, read_content, binary=False, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
 
         def f(_value):
-            return content_reader(value["path"], binary)
+            return content_reader(value["path"], fsdao, binary)
 
         if read_content:
             return Fun(f, **kwargs)
@@ -36,13 +41,17 @@ class FileReader(Component):
 
 class FileContent(Component):
     def __init__(self):
-        args = [dict(name="binary", type="boolean", label="Binary")]
+        args = [Options("output_type", options=["text", "json", "binary"], value="text")]
         super().__init__("File Content", group="Inputs", description=file_content_doc, args=args,
                          icon="RiFileList2Fill", configured=True)
 
-    def create(self, binary, **kwargs):
+    def create(self, output_type, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
+
         def f(value):
-            return content_reader(value, binary)
+            return content_reader(value, fsdao, output_type)
 
         return Fun(f, **kwargs)
 
@@ -79,6 +88,9 @@ class FileWriterComponent(Component):
     # def create(self, path=None, append=False, to_json=True, **kwargs):
     # return FileWriter(path, fsdao.base, append, to_json)
     def create(self, path=None, append=False, type="text", overwrite=False, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
         return FileWriter(path, fsdao, append, type, overwrite, **kwargs)
 
 
@@ -92,6 +104,9 @@ class LineReaderComponent(Component):
                                   group='Advanced settings')])
 
     def create(self, propagate=True, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
         return LineReader(fsdao, propagate=propagate, **kwargs)
 
 
@@ -109,6 +124,9 @@ class DirectoryComponent(Component):
                          args=args, click="Send file")
 
     def create(self, value, recursive, propagate=True, suffixes=None, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
         if suffixes:
             suffixes = [y.lower().strip() for y in suffixes.split(",")]
 
@@ -134,6 +152,9 @@ class CSVReaderComponent(Component):
                          icon="RiFileChart2Fill", click="Send file")
 
     def create(self, separator, infer_type, propagate, df, value=None, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
         return CSVReader(value, separator, fsdao, infer_type=infer_type, propagate=propagate, df=df, **kwargs)
 
 
@@ -156,6 +177,9 @@ class CSVWriterComponent(Component):
                          configured=True)
 
     def create(self, path=None, append=False, separator=',', overwrite=False, **kwargs):
+        fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
+        fsdao = LayeredFS()
+        fsdao.mount("data", fs_dao)
         return CSVWriter(path, fsdao, append, separator, overwrite=overwrite, **kwargs)
 
 

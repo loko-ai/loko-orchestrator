@@ -1,15 +1,17 @@
 from collections import defaultdict
 
+from aiohttp import ClientSession
 from loguru import logger
 
 from loko_orchestrator.business.components.io import WireIn, WireOut
 # from loko_orchestrator.business.groups import FACTORY
 from loko_orchestrator.business.groups import FACTORY
-from loko_orchestrator.config.app_config import GATEWAY, sio
+from loko_orchestrator.config.app_config import sio
 from loko_orchestrator.business.engine import Notifier, BatchedNotifier, MessageCollector, Constant, DummyProcessor
 # from loko_orchestrator.business.notifiers import AnimationNotifier
 import asyncio
 
+from loko_orchestrator.config.constants import GATEWAY
 from loko_orchestrator.model.projects import NodeInfo
 
 cached_messages = {}
@@ -42,18 +44,18 @@ def get_project_info(p):
         if n.name == "Wire In":
             wire_in = n.values['alias']
             for target in wireouts[wire_in]:
-                print(n.id, target.id)
+                # print(n.id, target.id)
                 edges[n.id].append(dict(end=target.id, endp1="output", endp2="input"))
 
     return p.id, nodes, edges, graphs
 
 
-def project2processor(id, pid, nodes, edges, tab, factory, collect=False, **kwargs):
+def project2processor(id, pid, nodes, edges, tab, factory, session: ClientSession, collect=False, **kwargs):
     def create_component(n):
         cc = factory[n.name]
         try:
             processors[n.id] = cc.create(id=n.id, name=n.name, gateway=GATEWAY, headers=headers, project_id=pid,
-                                         **n.values)
+                                         session=session, **n.values)
         except Exception as inst:
             # print(traceback.format_exc())
             logger.exception(inst)

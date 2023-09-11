@@ -21,10 +21,8 @@ def load_external_modules(path):
     with open(path) as imp:
         imports = json.load(imp)
         old_path = sys.path
-        print("old", old_path)
         modules = {}
         new_path = list(old_path) + [imports['path']]
-        print("new", new_path)
         sys.path = new_path
         for k, v in imports.get("modules", {}).items():
             modules[k] = importlib.import_module(v)

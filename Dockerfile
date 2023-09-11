@@ -12,7 +12,7 @@ WORKDIR /loko-orchestrator/loko_orchestrator/services
 RUN mkdir /obfuscated
 RUN mv services.py /obfuscated
 WORKDIR /obfuscated
-RUN pyarmor obfuscate services.py
+RUN pyarmor-7 obfuscate services.py
 RUN rm services.py
 WORKDIR /obfuscated/dist
 ENV PYTHONPATH=$PYTHONPATH:/loko-orchestrator

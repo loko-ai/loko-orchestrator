@@ -7,6 +7,7 @@ import pathlib
 import re
 import sys
 import traceback
+import types
 import warnings
 
 from aiohttp import ClientSession, ClientTimeout
@@ -16,7 +17,7 @@ from pathlib import Path
 import csv
 import random
 import time
-from types import GeneratorType
+from types import GeneratorType, AsyncGeneratorType
 import json
 
 from loguru import logger
@@ -46,8 +47,8 @@ class Repository:
     def __init__(self, repository):
         self.repository = repository
 
-    def get(self, k):
-        return self.repository.get()[k]
+    def get(self, k, _default=None):
+        return self.repository.get().get(k, _default)
 
     def set(self, k, v):
         self.repository.get()[k] = v
@@ -182,9 +183,9 @@ class Processor:
             try:
                 ret = await self.process(value, input, **kwargs)
             except Exception as inst:
-                print("Ready to notify error", str(inst), self.name, self.id)
+                logger.exception(inst)
                 await self.notify(ProcessorError(str(inst), self.name, self.id), output=output)
-                print("Notified error", str(inst), self.name, self.id)
+                logger.debug(f"Notified error {str(inst)} {self.name} {self.id}")
             if flush:
                 await self.end(input=input)
         return ret
@@ -232,6 +233,7 @@ class Fun(Processor):
             else:
                 if self.notify_warnings: w = await notify_warnings(self, w)
                 await self.notify(ret)
+                return ret
 
         if not self.propagate:
             await super().flush(input=input)
@@ -260,7 +262,6 @@ class HttpResponseFun(Processor):
         self.type = type
 
     async def consume(self, value, input="input", flush=False, **kwargs):
-        print("Resp %s" % repository.get())
         ret = None
         r = repository.get()
         if isinstance(value, ProcessorError):
@@ -276,8 +277,6 @@ class HttpResponseFun(Processor):
     async def process(self, value, input="input", **kwargs):
         r = repository.get()
         resp = r.get("response")
-        print("RRRR", resp)
-
         if "response" in r:
             if isinstance(resp, RespAcc):
                 resp.append(value)
@@ -582,6 +581,12 @@ async def stream(processor, result, output="output"):
     if result == []:
         await processor.notify(result, output=output)
         return
+    if isinstance(result, AsyncGeneratorType):
+        async for el in result:
+            logger.debug(el)
+            await processor.notify(el, output=output)
+        return
+
     if isinstance(result, (GeneratorType, range, list, tuple)):
         for el in result:
             await processor.notify(el, output=output)
@@ -617,10 +622,10 @@ class MultiFun(Processor):
         if input in self.funs:
             f, output = self.funs[input]
             res = await f(value, **kwargs)
-            if self.stream_result:
-                await stream(self, res, output)
-            else:
-                await self.notify(res, output)
+            # if isinstance(res, (types.GeneratorType, list, tuple)):
+            await stream(self, res, output)
+            # else:
+            # await self.notify(res, output)
             # await self.flush()
             if not self.propagate:
                 await super().flush(input=input)
@@ -826,6 +831,25 @@ class Grouper(Processor):
         await super().end(input)
 
 
+class HTTPRouteProcessor(Processor):
+    def __init__(self, args=None, **kwargs):
+        super().__init__(**kwargs)
+        self.args = args
+
+    async def process(self, value, input="input"):
+        logger.debug(f"{value.args} {self.args}")
+        if self.args:
+            if len(self.args) == 1:
+                await self.notify(value.args.get(self.args[0]), "args")
+            else:
+                temp = {}
+                for arg in self.args:
+                    temp[arg] = value.args.get(arg)
+                await self.notify(temp, "args")
+        await self.notify(value)
+        return value
+
+
 class Switch(Processor):
     def __init__(self, conditions, **kwargs):
         super().__init__(**kwargs)
@@ -909,7 +933,7 @@ class BatchedNotifier(Processor):
                         await emit(self.clients, self.label, json_friendly([x for x in self.queue if x]))
                     else:
                         msg = [x for x in self.queue if x and x.get('type') == "error"]
-                        print("MSG", msg, self.queue)
+                        # print("MSG", msg, self.queue)
 
                         if msg:
                             await emit(self.clients, self.label,
@@ -934,14 +958,14 @@ class BatchedNotifier(Processor):
                 self.errors += 1
                 ret = dict(info, project=self.project, group=self.group, name=self.sender, type="error",
                            uid=str(uuid4()),
-                           data=ellipsis(msg["msg"], n=500))
+                           data=ellipsis(msg["msg"], n=2000))
 
         elif self.debug:
             ret = dict(info, project=self.project, group=self.group, data=ellipsis(msg, n=500))
             # print("-----")
             # print(ret)
         if ret:
-            print("Accodo", ret)
+            # print("Accodo", ret)
             if self.n <= self.max_messages:
                 self.queue.append(ret)
             if self.n == self.max_messages + 1:
