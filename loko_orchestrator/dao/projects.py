@@ -15,8 +15,9 @@ from loko_orchestrator.config.constants import GATEWAY, EXTERNAL_GATEWAY
 from loko_orchestrator.utils.dict_utils import ObjectDict
 
 from loko_orchestrator.model.projects import Project, Endpoint, Edge, Node, Graph, Comment, Template, ShortNode, SN
+from loko_orchestrator.utils.json_merge import LokoProjectMerge
 from loko_orchestrator.utils.jsonutils import GenericJsonEncoder, GenericJsonDecoder
-from loko_orchestrator.utils.logger_utils import logger
+from loguru import logger
 from importlib.resources import path
 
 
@@ -119,6 +120,7 @@ class FSProjectDAO(ProjectDAO):
         self.ext = ext
         self.deployed = {}
         self.components = components
+        self.auto_merge = LokoProjectMerge(ignore_conflicts=True)
 
     async def all(self, client: LokoDockerClient, info=None) -> List[str]:
         ret = []
@@ -155,16 +157,25 @@ class FSProjectDAO(ProjectDAO):
                 prj.name = id
         except Exception as e:
             try:
-                logger.debug("first attempt project opening failed")
-                logger.debug("opening project file with old structure version: %s" % str(self.path / (id + self.ext)))
+                self.auto_merge(project=self.path / id, fname=("loko" + self.ext))
                 with open(path, "r") as o:
-                    prj = json.load(o)
-                prj = self.update_structure(prj)
-                prj.id = id
-                prj.name = id
+                    prj = json.load(o, object_hook=self._dec.object_hook)
+                    prj.id = id
+                    prj.name = id
             except Exception as e:
-                logger.exception("impossible to load %s" % str(self.path / (id + self.ext)))
-                raise Exception("impossible to load %s" % str(self.path / (id + self.ext)))
+                logger.error(f'auto merge error - {path}')
+                logger.exception(e)
+                try:
+                    logger.debug("first attempt project opening failed")
+                    logger.debug("opening project file with old structure version: %s" % str(self.path / (id + self.ext)))
+                    with open(path, "r") as o:
+                        prj = json.load(o)
+                    prj = self.update_structure(prj)
+                    prj.id = id
+                    prj.name = id
+                except Exception as e:
+                    logger.exception("impossible to load %s" % str(self.path / (id + self.ext)))
+                    raise Exception("impossible to load %s" % str(self.path / (id + self.ext)))
         return prj
 
     def save(self, project: Project, new_project=False):

@@ -7,7 +7,8 @@ from urllib.parse import urljoin
 import aiodocker
 import requests
 
-from loko_orchestrator.business.components.collections import GrouperComponent, HeadComponent, SamplerComponent
+from loko_orchestrator.business.components.collections import GrouperComponent, HeadComponent, SamplerComponent, \
+    CounterComponent
 from loko_orchestrator.business.components.commons import Debug, Function, Trigger, Array, Selector, MergeComponent, \
     SwitchComponent, Template, FilterComponent, Value, Renamer, Custom, SharedExtension, EventComponent, Globals
 from loko_orchestrator.business.components.ds4biz import Predictor
@@ -25,7 +26,7 @@ COMPONENTS = []
 COMPONENTS.append(dict(group="Common",
                        components=[Array(), Debug(), FilterComponent(), Function(),
                                    GrouperComponent(), HeadComponent(), MergeComponent(), Renamer(), SamplerComponent(),
-                                   Selector(),
+                                   Selector(), CounterComponent(),
                                    SwitchComponent(), Trigger(), EventComponent(), Globals()]))  # , FileConverter()]))
 
 COMPONENTS.append(dict(group="HTTP", components=[HTTPReq(), HTTPResponse(), HTTPRoute(), Template()]))
