@@ -104,7 +104,7 @@ class LokoProjectMerge(JSONMerge):
                 else:
                     node['conflicts'] = {k: v}
             else:
-                logger.error(f'Conflicts on: {el}')
+                logger.error(f'Unresolved conflicts on: {el} - {v}')
                 raise Exception('Conflict Error')
 
     def _dict2list(self, obj, *keys):
@@ -132,24 +132,24 @@ class LokoProjectMerge(JSONMerge):
     def _preprocess(self, prj):
         # list2dict
         for tab, tab_cont in prj['graphs'].items():
-            tab_cont = self._list2dict(tab_cont, 'id', 'nodes')
-            tab_cont = self._list2dict(tab_cont, 'id', 'edges')
+            tab_cont.update(self._list2dict(tab_cont, 'id', 'nodes'))
+            tab_cont.update(self._list2dict(tab_cont, 'id', 'edges'))
             if 'nodes' in tab_cont:
                 for node, node_cont in tab_cont['nodes'].items():
-                    node_cont = self._list2dict(node_cont, 'id', 'data', 'inputs')
-                    node_cont = self._list2dict(node_cont, 'id', 'data', 'outputs')
-                    node_cont = self._list2dict(node_cont, 'name', 'data', 'options', 'args')
+                    node_cont.update(self._list2dict(node_cont, 'id', 'data', 'inputs'))
+                    node_cont.update(self._list2dict(node_cont, 'id', 'data', 'outputs'))
+                    node_cont.update(self._list2dict(node_cont, 'name', 'data', 'options', 'args'))
 
     def _postprocess(self, prj):
         # dict2list
         for tab, tab_cont in prj['graphs'].items():
-            tab_cont = self._dict2list(tab_cont, 'nodes')
-            tab_cont = self._dict2list(tab_cont, 'edges')
+            tab_cont.update(self._dict2list(tab_cont, 'nodes'))
+            tab_cont.update(self._dict2list(tab_cont, 'edges'))
             if 'nodes' in tab_cont:
                 for i, node_cont in enumerate(tab_cont['nodes']):
-                    node_cont = self._dict2list(node_cont, 'data', 'inputs')
-                    node_cont = self._dict2list(node_cont, 'data', 'outputs')
-                    node_cont = self._dict2list(node_cont, 'data', 'options', 'args')
+                    node_cont.update(self._dict2list(node_cont, 'data', 'inputs'))
+                    node_cont.update(self._dict2list(node_cont, 'data', 'outputs'))
+                    node_cont.update(self._dict2list(node_cont, 'data', 'options', 'args'))
 
 
 
