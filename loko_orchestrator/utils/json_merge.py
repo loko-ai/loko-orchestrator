@@ -104,6 +104,7 @@ class LokoProjectMerge(JSONMerge):
                 else:
                     node['conflicts'] = {k: v}
             else:
+                logger.error(f'Conflicts on: {el}')
                 raise Exception('Conflict Error')
 
     def _dict2list(self, obj, *keys):
