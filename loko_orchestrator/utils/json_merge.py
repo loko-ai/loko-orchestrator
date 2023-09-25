@@ -15,6 +15,7 @@ class JSONMerge:
     def __init__(self, rules=None):
         self.rules = rules or {}
         self.conflicts = {}
+        self.ne = 'not exist'
 
     def merge_conflicts(self, root, local, remote, p=''):
         if local == remote:
@@ -24,7 +25,10 @@ class JSONMerge:
             ret = {}
             kk = set(local).union(remote)
             for k in kk:
-                ret[k] = self.merge_conflicts(root_tmp.get(k), local.get(k), remote.get(k), p + '.' + k)
+                res = self.merge_conflicts(root_tmp.get(k, self.ne), local.get(k, self.ne), remote.get(k, self.ne),
+                                           p + '.' + k)
+                if res!=self.ne:
+                    ret[k] = res
             return ret
         return self._merge(root, local, remote, p)
 
@@ -32,9 +36,9 @@ class JSONMerge:
         if local != root:
             # both modified
             if remote != root:
-                if not remote:
+                if remote==self.ne:
                     return local
-                if not local:
+                if local==self.ne:
                     return remote
                 last_key = p[1:].split('.')[-1]
                 if last_key in self.rules:
