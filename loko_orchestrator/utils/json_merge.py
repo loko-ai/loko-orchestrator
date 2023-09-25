@@ -95,10 +95,11 @@ class LokoProjectMerge(JSONMerge):
 
     def _add_values_conflicts(self, prj):
         for el, v in self.conflicts.items():
-            if re.search('^graphs\.main\.nodes\.[a-z0-9-]+\.data\.options\.values', el):
-                node_id = el.split('.')[3]
-                k = el.split('.')[-1]
-                node = prj['graphs']['main']['nodes'][node_id]
+            if re.search('^graphs\..+\.nodes\.[a-z0-9-]+\.data\.options\.values', el):
+                tab_name = el.split('graphs.')[1].split('.nodes.')[0]
+                node_id = el.split('.nodes.')[1].split('.data.')[0]
+                k = el.split('.values.')[1]
+                node = prj['graphs'][tab_name]['nodes'][node_id]
                 if self.ignore_conflicts:
                     node['data']['options']['values'][k] = v.get('remote')
                     logger.debug(f'Ignored conflict on {k} - local: {v.get("local")} - remote: {v.get("remote")}')
