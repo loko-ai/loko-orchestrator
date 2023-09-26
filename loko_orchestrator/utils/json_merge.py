@@ -12,10 +12,11 @@ from loko_orchestrator.utils.dict_path_utils import SafeDictPath
 
 
 class JSONMerge:
-    def __init__(self, rules=None):
+    def __init__(self, rules=None, sep='/'):
         self.rules = rules or {}
         self.conflicts = {}
         self.ne = 'not exist'
+        self.sep = sep
 
     def merge_conflicts(self, root, local, remote, p=''):
         if local == remote:
@@ -26,7 +27,7 @@ class JSONMerge:
             kk = set(local).union(remote)
             for k in kk:
                 res = self.merge_conflicts(root_tmp.get(k, self.ne), local.get(k, self.ne), remote.get(k, self.ne),
-                                           p + '.' + k)
+                                           p + self.sep + k)
                 if res!=self.ne:
                     ret[k] = res
             return ret
@@ -40,13 +41,13 @@ class JSONMerge:
                     return local
                 if local==self.ne:
                     return remote
-                last_key = p[1:].split('.')[-1]
+                last_key = p.strip(self.sep).split(self.sep)[-1]
                 if last_key in self.rules:
                     if self.rules[last_key]['validate'](p):
                         logger.debug(f'Apply rule: {p} - local: {local} - remote: {remote}')
                         return self.rules[last_key]['rule'](local, remote)
                 logger.debug(f'Conflict on {p} - local: {local} - remote: {remote}')
-                self.conflicts[p[1:]] = dict(local=local, remote=remote)
+                self.conflicts[p.strip(self.sep)] = dict(local=local, remote=remote)
             # only local modified
             return local
         # only remote modified
@@ -54,15 +55,15 @@ class JSONMerge:
 
 
 class LokoProjectMerge(JSONMerge):
-    def __init__(self, ignore_conflicts=True):
+    def __init__(self, ignore_conflicts=True, sep='/'):
         self.ignore_conflicts = ignore_conflicts
         rules = dict()
-        rules['last_modify'] = dict(rule=self._date_rule, validate=lambda x: x == '.last_modify')
+        rules['last_modify'] = dict(rule=self._date_rule, validate=lambda x: x == f'{sep}last_modify')
         rules['x'] = dict(rule=lambda local, remote: local,
-                          validate=lambda x: re.search('position\.x|positionAbsolute\.x', x))
+                          validate=lambda x: re.search(f'position{sep}x|positionAbsolute{sep}x', x))
         rules['y'] = dict(rule=lambda local, remote: local,
-                          validate=lambda x: re.search('position\.y|positionAbsolute\.y', x))
-        super().__init__(rules=rules)
+                          validate=lambda x: re.search(f'position{sep}y|positionAbsolute{sep}y', x))
+        super().__init__(rules=rules, sep=sep)
 
     def _date_rule(self, local, remote):
         local = datetime.strptime(local, '%d/%m/%Y, %H:%M:%S')
@@ -94,23 +95,28 @@ class LokoProjectMerge(JSONMerge):
             json.dump(merged, f, indent=2)
 
     def _add_values_conflicts(self, prj):
+        unresolved = {}
+        node_pattern = f'^graphs{self.sep}.+{self.sep}nodes{self.sep}[a-z0-9-]+{self.sep}data'
         for el, v in self.conflicts.items():
-            if re.search('^graphs\..+\.nodes\.[a-z0-9-]+\.data\.options\.values', el):
-                tab_name = el.split('graphs.')[1].split('.nodes.')[0]
-                node_id = el.split('.nodes.')[1].split('.data.')[0]
-                k = el.split('.values.')[1]
+            node_match = re.search(node_pattern, el)
+            if node_match:
+                tab_name = el.split('graphs'+self.sep)[1].split(self.sep+'nodes'+self.sep)[0]
+                node_id = el.split(self.sep+'nodes'+self.sep)[1].split(self.sep+'data'+self.sep)[0]
                 node = prj['graphs'][tab_name]['nodes'][node_id]
+                prop = el.split(node_match.group())[1]
+                node_up = SafeDictPath(node)
                 if self.ignore_conflicts:
-                    node['data']['options']['values'][k] = v.get('remote')
-                    logger.debug(f'Ignored conflict on {k} - local: {v.get("local")} - remote: {v.get("remote")}')
+                    node_up.set(prop.replace(self.sep, '/'), v.get('remote'))
+                    node.update(node_up.dict.copy())
+                    logger.debug(f'Ignored conflict on {prop} - local: {v.get("local")} - remote: {v.get("remote")}')
                     continue
-                if 'conflicts' in node:
-                    node['conflicts'][k] = v
-                else:
-                    node['conflicts'] = {k: v}
+                node_up.set('conflicts'+prop.replace(self.sep, '/'), v)
+                node.update(node_up.dict.copy())
             else:
-                logger.error(f'Unresolved conflicts on: {el} - {v}')
-                raise Exception('Conflict Error')
+                unresolved[el] = v
+        if unresolved:
+            logger.error(f'Unresolved conflicts on: {unresolved}')
+            raise Exception('Conflict Error')
 
     def _dict2list(self, obj, *keys):
 
