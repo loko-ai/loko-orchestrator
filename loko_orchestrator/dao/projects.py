@@ -126,22 +126,24 @@ class FSProjectDAO(ProjectDAO):
             return ret
         for el in self.path.iterdir():
             if el.is_dir() and (el / "loko.project").exists():
-
-                p = self.get(el.name)
-                # with open(str(x)) as f:
-                #     p = ObjectDict(json.load(f))
-                if info:
-                    m = dict()
-                    m["id"] = el.name
-                    m["name"] = el.name
-                    m["created_on"] = p.created_on
-                    m["last_modify"] = p.last_modify
-                    m["description"] = p.description
-                    m["version"] = p.version
-                    m['deployed'] = await self.is_deployed(el.name, client)
-                    ret.append(m)
-                else:
-                    ret.append(p.name)
+                try:
+                    p = self.get(el.name)
+                    # with open(str(x)) as f:
+                    #     p = ObjectDict(json.load(f))
+                    if info:
+                        m = dict()
+                        m["id"] = el.name
+                        m["name"] = el.name
+                        m["created_on"] = p.created_on
+                        m["last_modify"] = p.last_modify
+                        m["description"] = p.description
+                        m["version"] = p.version
+                        m['deployed'] = await self.is_deployed(el.name, client)
+                        ret.append(m)
+                    else:
+                        ret.append(p.name)
+                except Exception as inst:
+                    logger.error(inst)
                 # print(ret)
         return ret
 
