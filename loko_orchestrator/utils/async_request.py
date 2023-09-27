@@ -44,6 +44,8 @@ async def request(url, session: ClientSession, method="GET", accept="json", **kw
         ret = Temp(resp)
         streams.append(ret)
         return ret()
+    if resp.content_type == "text/html":
+        return await resp.text()
 
     if resp.content_type != "application/json":
         return await resp.read()
