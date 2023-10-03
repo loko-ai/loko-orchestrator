@@ -2,6 +2,11 @@
 from dict_path import DictPath
 
 class SafeDictPath(DictPath):
+
+    def clean_path(self, path):
+        if isinstance(path, tuple):
+            return list(path)
+        return super().clean_path(path)
     def __contains__(self, path):
         path = self.clean_path(path)
         current = self.data.copy()

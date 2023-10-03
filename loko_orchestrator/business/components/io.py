@@ -29,9 +29,10 @@ class FileReader(Component):
         fs_dao = FSDao(PUBLIC_FOLDER, lambda x: x.suffix == ".metadata")
         fsdao = LayeredFS()
         fsdao.mount("data", fs_dao)
+        output_type = 'binary' if binary else 'text'
 
         def f(_value):
-            return content_reader(value["path"], fsdao, binary)
+            return content_reader(value["path"], fsdao, output_type)
 
         if read_content:
             return Fun(f, **kwargs)
