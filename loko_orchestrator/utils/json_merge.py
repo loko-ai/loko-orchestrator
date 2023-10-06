@@ -125,10 +125,41 @@ class LokoProjectMerge(JSONMerge):
 
         merged = self.merge_conflicts(root_prj, local_prj, remote_prj)
         self._add_values_conflicts(merged)
+        merged = self._edges_check(merged, local_prj, remote_prj)
         self._postprocess(merged)
 
         with open(Path(project) / fname, 'w') as f:
             json.dump(merged, f, indent=2)
+
+    def _edges_check(self, merged_prj, local_prj, remote_prj):
+        merged = SafeDictPath(merged_prj)
+        local = SafeDictPath(local_prj)
+        remote = SafeDictPath(remote_prj)
+        checks = dict()
+
+        ### find existing nodes ###
+        for tab_name in merged.get('graphs'):
+            for node_id in merged.get(('graphs', tab_name, 'nodes')):
+                local_exist = local.get(('graphs', tab_name, 'nodes', node_id))
+                remote_exist = remote.get(('graphs', tab_name, 'nodes', node_id))
+                if local_exist and not remote_exist:
+                    checks[(tab_name, node_id)] = 'local'
+                elif local_exist and not remote_exist:
+                    checks[(tab_name, node_id)] = 'remote'
+        ### keep their edges ###
+        for k,v in checks.items():
+            tab_name, node_id = k
+            merged_nodes = merged.get(('graphs', tab_name, 'nodes'))
+            ref = local if v=='local' else remote
+            ref_edges = ref.get(('graphs', tab_name, 'edges'))
+            ref_edges = {k:v for k,v in ref_edges.items() if v.get('source')==node_id or v.get('target')==node_id}
+            ref_edges = {k: v for k, v in ref_edges.items()
+                         if v.get('source') in merged_nodes or v.get('target') in merged_nodes}
+            for edge_id,edge_cont in ref_edges.items():
+                merged.set(('graphs', tab_name, 'edges', edge_id), edge_cont)
+                logger.debug(f'Keep edge {edge_id} from {v}')
+
+        return merged.dict.copy()
 
     def _add_values_conflicts(self, prj):
         unresolved = {}
@@ -207,7 +238,7 @@ if __name__ == '__main__':
 
     print('MERGED:', merged)
 
-    # sys.exit()
+    sys.exit()
 
     #### modifichiamo a mano ####
 
